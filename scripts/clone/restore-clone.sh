@@ -76,7 +76,7 @@ docker run -d \
   --cpus "${CLUSTR_CLONE_CPU_LIMIT:-8}" \
   --memory "${CLUSTR_CLONE_MEMORY_LIMIT:-16g}" \
   --memory-swap "${CLUSTR_CLONE_MEMORY_SWAP_LIMIT:-20g}" \
-  --health-cmd "pg_isready -U clustr_clone -d ${database}" \
+  --health-cmd "psql -X -U clustr_clone -d ${database} -Atq -c 'select 1'" \
   --health-interval 10s \
   --health-timeout 5s \
   --health-start-period 20s \
@@ -91,10 +91,12 @@ docker run -d \
   "$source_image_digest" >/dev/null
 
 for _ in $(seq 1 120); do
-  docker exec "$container_name" pg_isready -U clustr_clone -d "$database" >/dev/null 2>&1 && break
+  docker exec "$container_name" psql -X -v ON_ERROR_STOP=1 -U clustr_clone -d "$database" -Atq -c 'select 1' 2>/dev/null |
+    grep -qx 1 && break
   sleep 1
 done
-docker exec "$container_name" pg_isready -U clustr_clone -d "$database" >/dev/null 2>&1 ||
+docker exec "$container_name" psql -X -v ON_ERROR_STOP=1 -U clustr_clone -d "$database" -Atq -c 'select 1' 2>/dev/null |
+  grep -qx 1 ||
   clone_die "restored PostgreSQL did not become ready"
 
 docker exec "$container_name" pg_restore \

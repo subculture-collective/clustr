@@ -73,6 +73,10 @@ free space, PostgreSQL transaction age, load, and container health. Abort if it
 threatens production. An abort keeps production unchanged, removes any plaintext
 partial archive, and marks the export `FAILED`.
 
+Restarting the same systemd instance is idempotent after a completed source
+export: it checksum-validates and resumes transfer/restore without taking a new
+production snapshot. A source export that never reached `READY` is not reused.
+
 Success requires:
 
 - source `READY`, valid checksums, and an encrypted `.dump.gpg` only;

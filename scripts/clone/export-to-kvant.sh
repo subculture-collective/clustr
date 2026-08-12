@@ -89,7 +89,11 @@ clone_validate_id "$clone_id"
 exec 8>"${incoming_root}/.pipeline.lock"
 flock -n 8 || clone_die "another clone pipeline is running"
 if [[ $mode == --execute ]]; then
-  remote_source export "$clone_id" "$source_root" "$source_container" "$database" "$gpg_recipient" "$gpg_public_key_b64"
+  if remote_source status "$clone_id" "$source_root" "$source_container" "$database" >/dev/null 2>&1; then
+    echo "resuming existing verified source export: $clone_id"
+  else
+    remote_source export "$clone_id" "$source_root" "$source_container" "$database" "$gpg_recipient" "$gpg_public_key_b64"
+  fi
 else
   remote_source status "$clone_id" "$source_root" "$source_container" "$database"
 fi
