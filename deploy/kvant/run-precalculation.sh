@@ -110,9 +110,13 @@ if ! timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; t
   exit 69
 fi
 
-worker_args=(--once --full)
+# Every published world must include source rows newer than the prior catalog.
+# The measured full-corpus pass fits inside the hourly window; retain the
+# explicit initial mode as an operator-facing cutover signal even though both
+# paths intentionally use the same complete publication contract.
+worker_args=(--once --full --full-catalog)
 if [[ ${mode} == "--initial-full" ]]; then
-  worker_args=(--once --full)
+  worker_args=(--once --full --full-catalog)
 fi
 
 docker run --rm \

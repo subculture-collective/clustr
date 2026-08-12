@@ -28,9 +28,13 @@ func main() {
 	fullRebuild := flag.Bool("full", false, "Force a full rebuild instead of incremental update")
 	once := flag.Bool("once", false, "Run one calculation/publication and exit")
 	publishOnly := flag.Bool("publish-only", false, "Publish the existing graph workspace without rebuilding it (requires --once)")
+	fullCatalog := flag.Bool("full-catalog", false, "Build and publish a complete spatial catalog before the graph revision (requires --once)")
 	flag.Parse()
 	if *publishOnly && !*once {
 		log.Fatal("--publish-only requires --once")
+	}
+	if *fullCatalog && !*once {
+		log.Fatal("--full-catalog requires --once")
 	}
 
 	// Load configuration
@@ -124,7 +128,7 @@ func main() {
 	// Always run once at start when enabled (may defer if not enough data yet).
 	// A one-shot invocation is used by remote workers and deployment gates, so it
 	// must fail closed instead of reporting success after a skipped/failed build.
-	if err := runOnce(ctx, dbConn, queries, graphService, *fullRebuild, *publishOnly); err != nil {
+	if err := runOnce(ctx, dbConn, queries, graphService, *fullRebuild, *publishOnly, *fullCatalog); err != nil {
 		logger.Error("Graph calculation/publication run failed", "error", err)
 		if *once {
 			log.Fatal(err)
@@ -152,7 +156,7 @@ func main() {
 				continue
 			}
 			// Scheduled runs use incremental mode by default
-			if err := runOnce(ctx, dbConn, queries, graphService, false, false); err != nil {
+			if err := runOnce(ctx, dbConn, queries, graphService, false, false, false); err != nil {
 				logger.Error("Scheduled graph calculation/publication run failed", "error", err)
 			}
 		}
@@ -184,7 +188,7 @@ func hasMinSubredditsWithPosts(ctx context.Context, dbc *sql.DB, min int) (bool,
 	return cnt >= min, cnt, nil
 }
 
-func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService *graph.Service, fullRebuild, publishOnly bool) error {
+func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService *graph.Service, fullRebuild, publishOnly, fullCatalog bool) error {
 	sourceWatermark := time.Now().UTC()
 	// Defer precalc until at least two subreddits have been crawled (i.e., produced posts)
 	if ok, cnt, err := hasMinSubredditsWithPosts(ctx, dbc, 2); err != nil {
@@ -199,6 +203,13 @@ func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService
 		}
 	} else {
 		logger.Info("Publishing existing graph workspace without recalculation")
+	}
+	if fullCatalog {
+		catalogID, err := graph.BuildSpatialCatalogAtWatermark(ctx, dbc, sourceWatermark)
+		if err != nil {
+			return fmt.Errorf("build full spatial catalog: %w", err)
+		}
+		logger.Info("Published full spatial catalog", "catalog_id", catalogID)
 	}
 	// Publication is separate from the mutable build workspace.  The publisher
 	// stages a complete immutable snapshot and swaps its current pointer atomically;

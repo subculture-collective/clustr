@@ -46,6 +46,8 @@ export interface LabelData {
   text: string;
   position: { x: number; y: number; z: number };
   size?: number; // Optional size multiplier
+  priority?: number;
+  alwaysVisible?: boolean;
 }
 
 export interface SDFTextRendererConfig {
@@ -59,6 +61,30 @@ interface TextObject {
   text: Text;
   id: string;
   visible: boolean;
+  priority: number;
+  alwaysVisible: boolean;
+}
+
+// The bundled font deliberately covers the scripts most common in the source
+// corpus without pulling Troika's ~300 MB Unicode fallback catalog at runtime.
+// Preserve the exact label in the API/search/inspector; only the GPU glyph
+// layer substitutes unsupported code points so it never depends on a CDN.
+export function renderableSpatialLabel(value: string, maxLength = 28): string {
+  const supported = Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return (
+      (codePoint >= 0x20 && codePoint <= 0x024f) ||
+      (codePoint >= 0x0370 && codePoint <= 0x052f) ||
+      (codePoint >= 0x1e00 && codePoint <= 0x1eff) ||
+      (codePoint >= 0x2000 && codePoint <= 0x206f) ||
+      (codePoint >= 0x20a0 && codePoint <= 0x20cf)
+    )
+      ? character
+      : '?';
+  }).join('');
+  return supported.length > maxLength
+    ? `${supported.slice(0, maxLength - 1)}…`
+    : supported;
 }
 
 export class SDFTextRenderer {
@@ -77,7 +103,7 @@ export class SDFTextRenderer {
     this.maxLabels = config.maxLabels || 500;
     this.fontSize = config.fontSize || 8;
     this.color = config.color || '#ffffff';
-    this.backgroundColor = config.backgroundColor || 'rgba(0,0,0,0.35)';
+    this.backgroundColor = config.backgroundColor || '#000000';
 
     // Create group to hold all text objects
     this.group = new THREE.Group();
@@ -111,7 +137,7 @@ export class SDFTextRenderer {
         const text = new Text();
         
         // Configure text appearance
-        text.text = label.text.length > 28 ? label.text.slice(0, 27) + '…' : label.text;
+        text.text = renderableSpatialLabel(label.text);
         // Keep label rendering deterministic and available offline. Troika's
         // network default font made the scene depend on a third-party CDN.
         (text as Text & { font: string }).font = '/fonts/NotoSans-Latin.woff';
@@ -142,12 +168,14 @@ export class SDFTextRenderer {
           text,
           id: label.id,
           visible: true,
+          priority: label.priority ?? 0,
+          alwaysVisible: label.alwaysVisible ?? false,
         };
         this.textObjects.set(label.id, textObj);
       } else {
         // Update existing text object
         const text = textObj.text;
-        const newText = label.text.length > 28 ? label.text.slice(0, 27) + '…' : label.text;
+        const newText = renderableSpatialLabel(label.text);
         
         if (text.text !== newText) {
           text.text = newText;
@@ -161,6 +189,8 @@ export class SDFTextRenderer {
         if (label.position) {
           text.position.set(label.position.x, label.position.y, label.position.z);
         }
+        textObj.priority = label.priority ?? 0;
+        textObj.alwaysVisible = label.alwaysVisible ?? false;
       }
 
       // Trigger text sync (troika batches updates)
@@ -203,7 +233,11 @@ export class SDFTextRenderer {
     const distanceCheck = maxDistance !== undefined && cameraDistance !== undefined;
     const shouldShowLabels = !distanceCheck || cameraDistance < maxDistance;
 
-    for (const [id, textObj] of this.textObjects) {
+    const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+    const candidates = Array.from(this.textObjects.entries()).sort(
+      ([idA, a], [idB, b]) => b.priority - a.priority || idA.localeCompare(idB)
+    );
+    for (const [id, textObj] of candidates) {
       // Check if in label set
       const inLabelSet = labelSet.has(id);
       
@@ -212,7 +246,18 @@ export class SDFTextRenderer {
       const inFrustum = this.frustum.containsPoint(pos);
 
       // Update visibility
-      const shouldBeVisible = inLabelSet && inFrustum && shouldShowLabels;
+      let shouldBeVisible = inLabelSet && inFrustum && (shouldShowLabels || textObj.alwaysVisible);
+      if (shouldBeVisible) {
+        const projected = pos.clone().project(camera);
+        const halfWidth = Math.min(0.18, Math.max(0.025, String(textObj.text.text).length * 0.006));
+        const halfHeight = 0.035;
+        const box = { left: projected.x - halfWidth, right: projected.x + halfWidth, top: projected.y + halfHeight, bottom: projected.y - halfHeight };
+        const collides = !textObj.alwaysVisible && occupied.some(existing =>
+          box.left < existing.right && box.right > existing.left && box.bottom < existing.top && box.top > existing.bottom
+        );
+        if (collides) shouldBeVisible = false;
+        else occupied.push(box);
+      }
       
       if (textObj.visible !== shouldBeVisible) {
         textObj.text.visible = shouldBeVisible;

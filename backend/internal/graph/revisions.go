@@ -94,13 +94,15 @@ func publishRevisionWithOptions(ctx context.Context, database *sql.DB, options R
 	})
 	var id int64
 	err := database.QueryRowContext(ctx, `INSERT INTO graph_revisions(
-status,source_watermark,algorithm_version,config,layout_algorithm,layout_seed,layout_dimensions)
+status,source_watermark,algorithm_version,config,layout_algorithm,layout_seed,layout_dimensions,spatial_catalog_id)
 SELECT 'staging',COALESCE($2::timestamptz,GREATEST(
   COALESCE((SELECT max(updated_at) FROM subreddits),to_timestamp(0)),
   COALESCE((SELECT max(updated_at) FROM users),to_timestamp(0)),
   COALESCE((SELECT max(updated_at) FROM posts),to_timestamp(0)),
   COALESCE((SELECT max(updated_at) FROM comments),to_timestamp(0))
-)),'projection-v1',$1::jsonb,'stable-community-3d-v1',0,3 RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
+)),'projection-v1',$1::jsonb,'stable-community-3d-v1',0,3,
+  (SELECT catalog_id FROM spatial_catalog_current WHERE singleton)
+RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create staging revision: %w", err)
 	}
@@ -172,6 +174,23 @@ SELECT $1,m.stable_id,NULL,0,c.label,c.size,
 FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id`, id)
 	if err != nil {
 		return failTx("community_landmarks", err)
+	}
+	// Community numbers are implementation detail, not useful landmarks. Name
+	// each territory from its three strongest subreddit members while retaining
+	// the stable community ID and coordinates across publications.
+	_, err = tx.ExecContext(ctx, `UPDATE graph_revision_communities c SET label=COALESCE((
+ SELECT string_agg(member.name,' · ' ORDER BY member.value DESC,member.name)
+ FROM (
+   SELECT n.name,CASE WHEN n.val ~ '^[0-9]+$' THEN n.val::bigint ELSE 0 END value
+   FROM graph_community_members gm
+   JOIN revision_community_map map ON map.legacy_id=gm.community_id
+   JOIN graph_nodes n ON n.id=gm.node_id AND n.type='subreddit'
+   WHERE map.stable_id=c.community_id
+   ORDER BY value DESC,n.name LIMIT 3
+ ) member
+),c.label) WHERE c.revision_id=$1`, id)
+	if err != nil {
+		return failTx("community_labels", err)
 	}
 
 	// Each typed branch is a bounded, indexable top-N lookup.  Do not use a

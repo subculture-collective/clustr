@@ -66,7 +66,11 @@ DELETE FROM posts WHERE id LIKE 'revision_p%'; DELETE FROM users WHERE id IN (19
 	}
 	var landmarkID string
 	var x1, y1, z1 float64
-	if err := conn.QueryRowContext(ctx, `SELECT community_id,x,y,z FROM graph_revision_communities WHERE revision_id=$1 AND label='Alpha'`, first).Scan(&landmarkID, &x1, &y1, &z1); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT c.community_id,c.x,c.y,c.z
+FROM graph_revision_communities c
+JOIN graph_revision_community_members m
+  ON m.revision_id=c.revision_id AND m.community_id=c.community_id
+WHERE c.revision_id=$1 AND m.node_id='subreddit_1900000001'`, first).Scan(&landmarkID, &x1, &y1, &z1); err != nil {
 		t.Fatal(err)
 	}
 	second, err := PublishRevision(ctx, conn)
@@ -75,7 +79,11 @@ DELETE FROM posts WHERE id LIKE 'revision_p%'; DELETE FROM users WHERE id IN (19
 	}
 	var matchedID string
 	var x2, y2, z2 float64
-	if err := conn.QueryRowContext(ctx, `SELECT community_id,x,y,z FROM graph_revision_communities WHERE revision_id=$1 AND label='Alpha'`, second).Scan(&matchedID, &x2, &y2, &z2); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT c.community_id,c.x,c.y,c.z
+FROM graph_revision_communities c
+JOIN graph_revision_community_members m
+  ON m.revision_id=c.revision_id AND m.community_id=c.community_id
+WHERE c.revision_id=$1 AND m.node_id='subreddit_1900000001'`, second).Scan(&matchedID, &x2, &y2, &z2); err != nil {
 		t.Fatal(err)
 	}
 	if matchedID != landmarkID || x1 != x2 || y1 != y2 || z1 != z2 {

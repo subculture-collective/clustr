@@ -44,8 +44,8 @@ describe('SpatialSceneClient', () => {
 
     const request = String(fetchMock.mock.calls[1][0]);
     expect(request).toContain('/graph/region?');
-    expect(request).toContain('max_nodes=5000');
-    expect(request).toContain('max_links=20000');
+    expect(request).toContain('max_nodes=1000');
+    expect(request).toContain('max_links=5000');
     expect(request).toContain('revision=9');
   });
 
@@ -85,5 +85,27 @@ describe('SpatialSceneClient', () => {
     expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/graph/manifest'))).toHaveLength(1);
     expect(graphRequests.length).toBeGreaterThan(0);
     expect(graphRequests.every(path => path.includes('revision=9'))).toBe(true);
+  });
+
+  it('loads a bounded full-corpus entity neighborhood', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4, nodes: [], links: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const scene = await new SpatialSceneClient().entity('comment_xyz');
+
+    expect(scene.catalog).toBe('4');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/graph/entity/comment_xyz?');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('revision=9');
+  });
+
+  it('rejects a slice from a different spatial catalog', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 5, nodes: [], links: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new SpatialSceneClient().overview()).rejects.toThrow('Mixed spatial catalog response');
   });
 });

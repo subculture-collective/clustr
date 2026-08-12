@@ -4,25 +4,25 @@ interface FieldGuideProps { open: boolean; onClose: () => void }
 
 const visualTerms = [
   ['Landmarks', 'Large luminous bodies are stable community territories. Their position is preserved between published worlds so the universe remains learnable.'],
-  ['Routes', 'Lines express relationships. Their stored weight counts repeated activity, overlap, authorship, or replies; the far overview keeps route styling deliberately quiet.'],
-  ['Scale', 'Distance changes meaning. Far away you see community landmarks; approaching loads a bounded neighborhood of subreddits and people. Posts and comments remain available in the detail views while close-range spatial LOD is expanded.'],
+  ['Routes', 'Lines express relationships. Repeated activity and subreddit overlap are stored as weighted routes; authorship, publishing, comments, and replies are projected from each object’s canonical references.'],
+  ['Scale', 'Distance changes meaning. Far away you see community landmarks; zooming streams the camera’s bounded 3D region. Posts appear at inspect scale, and selecting a post or object reveals its labeled comments and relationships.'],
   ['Color', 'Acid green marks subreddits, cyan marks people, amber marks posts, and rose marks comments. Landmark color may instead identify a community.'],
 ];
 
 const pipeline = [
   ['01', 'Collect', 'Recurring workers gather subreddit metadata, posts, comments, authors, and discovered communities.'],
-  ['02', 'Project', 'Source records become typed, directed or undirected, weighted graph relationships.'],
-  ['03', 'Publish', 'A complete immutable revision is calculated and validated, then atomically becomes the current world.'],
-  ['04', 'Place', 'Deterministic 3D layout anchors stable communities and positions nearby entities around their landmarks.'],
-  ['05', 'Render', 'The browser loads the overview and selected neighborhoods, then draws them with GPU-instanced Three.js. Camera-driven region streaming is the next scaling layer.'],
+  ['02', 'Project', 'Source records become typed weighted routes plus canonical author, parent, post, and community references.'],
+  ['03', 'Place', 'The full catalog gives every subreddit, person, post, and comment a semantic label and reproducible 3D coordinate.'],
+  ['04', 'Publish', 'Validation checks complete source coverage, labels, coordinates, bounds, and links before an immutable revision atomically references the catalog.'],
+  ['05', 'Stream + render', 'The browser pins that revision, loads only the overview or camera region, and draws the bounded scene with GPU-instanced Three.js and collision-managed labels.'],
 ];
 
 const calculations = [
-  ['Relationship weight', 'Repeated evidence accumulates instead of producing duplicate lines. Two people active in the same pair of subreddits make that overlap route weight 2; authorship and replies remain directed.'],
+  ['Relationship weight', 'Repeated evidence accumulates instead of producing duplicate lines. Shared activity strengthens overlap routes; authorship, publishing, comments, and replies remain directed when projected into the scene.'],
   ['Community structure', 'A deterministic weighted community calculation finds strongly connected territories. The launch world uses its bounded top-level partition; complete multi-level coverage is the next refinement.'],
   ['Stable identity', 'A new community inherits a prior landmark ID when the strongest membership match is mutual. Existing landmark coordinates are warm-started so familiar territories do not jump arbitrarily.'],
-  ['Three-axis layout', 'A bounded force pass places the strongest connected core in three axes. Published nodes then use warm-started community anchors or deterministic 3D seeds, so every coordinate is reproducible and region-queryable.'],
-  ['Publication checks', 'The current promotion gate requires finite, noncollapsed 3D bounds, valid link endpoints, and nonempty community landmarks. Complete hierarchy coverage and measured drift thresholds remain explicit post-launch qualification metrics.'],
+  ['Three-axis layout', 'A bounded force pass places the strongest connected core in three axes. The full catalog warm-starts old objects, anchors people and content to their semantic homes, and deterministically seeds anything new.'],
+  ['Publication checks', 'Promotion requires exact per-type source counts at the watermark, nonempty labels, finite noncollapsed XYZ bounds, valid endpoints, and nonempty community landmarks. A failed build leaves the visible world unchanged.'],
 ];
 
 export default function FieldGuide({ open, onClose }: FieldGuideProps) {

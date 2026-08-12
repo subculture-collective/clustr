@@ -5,10 +5,11 @@
 Almaz remains the durable service and PostgreSQL host. Kvant runs one bounded,
 CPU-first calculation at a time and publishes an immutable revision back to
 Almaz. PostgreSQL stays bound to Almaz loopback; the worker opens a temporary
-SSH tunnel and closes it after the run. The current calculation is SQL-heavy,
-so its SQL stages still execute in PostgreSQL on Almaz. The force-layout stage
-runs on Kvant and completed in seconds during rehearsal; GPU enablement would
-not materially improve the current end-to-end job.
+SSH tunnel and closes it after the run. The full Spatial Catalog is SQL-heavy:
+placement, labeling, validation, and typed-link projection execute in
+PostgreSQL on Almaz while Kvant owns the job lifecycle and the smaller
+force-layout stage. A GPU would not materially improve this implementation;
+use CPU until a measured native compute stage exists.
 
 Each run records its start time as the source watermark and advances the
 incremental cutoff only after a successful build. Rows arriving during a run
@@ -25,9 +26,10 @@ retention window.
 ## Qualified rehearsal baseline (2026-08-12)
 
 The rehearsal used a verified custom-format clone of the Almaz `reddit_cluster`
-database on Kvant. Source counts matched production: 320,553 subreddits,
-401,366 posts, and 4,306,537 comments. Migrations 28 and 29 completed, all
-320,553 subreddits received durable crawl requests, and no request was missing.
+database on Kvant. After the bounded crawler canary, the fixed source watermark
+contained 320,554 subreddits, 1,866,126 users, 401,367 posts, and 4,306,542
+comments: 6,894,589 source objects total. Migrations 28 through 30 completed,
+every subreddit received a durable crawl request, and no request was missing.
 
 A full CPU calculation and immutable publication completed in 593,249 ms with
 597,672 KiB peak Go RSS. It produced revision 9 with 100,000 nodes, 200,000
@@ -35,6 +37,19 @@ typed weighted links, 6,794 communities, finite non-collapsed XYZ bounds, and
 no orphan links. The revision-aware health, readiness, manifest, overview,
 region, community, and diff routes returned successfully. Hardware-accelerated
 Chromium rendered the real revision and keyboard travel plus inspection worked.
+
+The full labeled Spatial Catalog then completed in 1,103,366 ms (18m 23s)
+with 19,900 KiB peak Go-process RSS. Catalog 9 contains all 6,894,589 objects,
+4,577,767 cross-cutting weighted links, exact per-type counts, no empty labels,
+no orphan endpoints, and finite non-collapsed XYZ bounds. Its entity table and
+indexes use 3,192 MB and its link table and indexes use 1,683 MB; the complete
+rehearsal database uses 9,261 MB. Revision 11 atomically references that catalog
+while keeping the GPU-resident overview capped at 100,000 nodes and 200,000
+links. A 20-request warm camera-region sample at 1,000 nodes measured 142 ms
+p95 (143 ms max); exact-entity search measured 1.2 ms and a common label-prefix
+search 19.5 ms. Chromium searched for a real fallback-labeled comment, flew to
+its persisted coordinate, rendered its label, restored camera state in the URL,
+and reported zero console errors or warnings.
 
 This is clone and local-browser evidence, not proof of a deployed release or a
 live production deployment. A deliberately bounded Reddit canary did run
@@ -75,28 +90,37 @@ These are deliberate operator steps, not commands for unattended automation.
    frontend serving their existing read model.
 2. Take a fresh Almaz database backup and verify its checksum and archive TOC.
 3. Run the migration image once against Almaz. Verify the migration ledger
-   contains `000028_crawl_lifecycle.up.sql` and
-   `000029_graph_revisions.up.sql`. Confirm `crawl_requests` has one row per
+   contains `000028_crawl_lifecycle.up.sql`,
+   `000029_graph_revisions.up.sql`, and
+   `000030_spatial_catalog.up.sql`. Confirm `crawl_requests` has one row per
    intended subreddit and inspect the active/backlog cohort counts.
 4. Keep `CRAWLER_LIFECYCLE_ENABLED=false` for the first API restart. Keep
    revision reads disabled until the first immutable revision is present if the
    deployment health orchestration cannot tolerate a deliberately unready API.
-5. Run the first calculation manually on Kvant and follow its journal:
+5. Run the first calculation manually on Kvant in initial-full mode and follow
+   its journal. This mode calculates the resident graph and the full labeled
+   catalog. Ordinary hourly runs use the same complete contract at a new source
+   watermark; they do not leave the catalog frozen at launch:
 
    ```bash
-   sudo systemctl start clustr-precalculate.service
-   sudo journalctl -fu clustr-precalculate.service
+   sudo -u onnwee /opt/clustr/deploy/kvant/run-precalculation.sh \
+     /etc/clustr/kvant-precalculate.env --initial-full \
+     2>&1 | tee /var/tmp/clustr-initial-full.log
    ```
 
 6. The service must exit successfully. On Almaz, verify all of the following
    before switching reads:
    - the current revision pointer advanced exactly once;
    - node/link/community counts are within configured caps;
+   - catalog entity counts exactly match the four source entity tables at the
+     recorded watermark and every entity has a nonempty semantic label;
+   - catalog link endpoints are complete and catalog bounds are finite and
+     non-collapsed;
    - no link has a missing endpoint;
    - coordinates and bounds are finite and non-collapsed;
    - `/ready` reports schema, crawl leases, and publication as healthy;
-   - manifest, overview, bounded region, community, and diff responses all name
-     the same revision.
+   - manifest, overview, bounded region, community, entity, search, node-detail,
+     and diff responses all name the same revision and spatial catalog.
 7. Enable revision reads and restart only the API/frontend services needed for
    the flag change. Validate the public route in hardware-accelerated Chromium:
    meaningful separated landmarks, camera travel, selection, inspector,

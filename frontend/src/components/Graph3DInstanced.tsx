@@ -142,16 +142,67 @@ export default function Graph3DInstanced(props: Props) {
     const hoveredNodeRef = useRef<string | null>(null);
     const keyboardNodeIndexRef = useRef(0);
     const showLabelsRef = useRef<boolean>(false);
+    const loadedFocusRef = useRef<string | null>(null);
     const labelSetRef = useRef<Set<string>>(new Set());
     const lastFrameTimeRef = useRef<number>(performance.now());
     const lastEmittedTierRef = useRef<LODTier>(currentLODTier);
     const lastFramedRevisionRef = useRef<string | null>(null);
+    const overviewRadiusRef = useRef<number | null>(null);
+    const lastRegionSignatureRef = useRef<string | null>(null);
+    const regionAbortRef = useRef<AbortController | null>(null);
+    const requestRegionRef = useRef<(camera: THREE.PerspectiveCamera, controls: OrbitControls) => void>(() => undefined);
     const sceneClientRef = useRef(new SpatialSceneClient());
+    const sceneSourceRef = useRef<SpatialScene['source'] | null>(null);
     const onCameraChangeRef = useRef(onCameraChange);
     const onLODTierChangeRef = useRef(onLODTierChange);
 
     useEffect(() => { onCameraChangeRef.current = onCameraChange; }, [onCameraChange]);
     useEffect(() => { onLODTierChangeRef.current = onLODTierChange; }, [onLODTierChange]);
+    useEffect(() => { sceneSourceRef.current = scene?.source ?? null; }, [scene?.source]);
+
+    // Camera-driven discovery is the seam between the complete catalog and the
+    // bounded GPU scene. A settled, meaningfully zoomed-in camera asks for the
+    // visible spatial volume; the browser never downloads the full corpus.
+    requestRegionRef.current = (camera, controls) => {
+        if (!scene?.revision || !scene.catalog || focusNodeId || selectedId) return;
+        const overviewRadius = overviewRadiusRef.current;
+        const distance = camera.position.distanceTo(controls.target);
+        if (!overviewRadius || distance >= overviewRadius * 1.6) return;
+
+        const halfExtent = Math.max(20, distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.9);
+        const quantum = Math.max(5, halfExtent / 4);
+        const signature = [controls.target.x, controls.target.y, controls.target.z, halfExtent]
+            .map(value => Math.round(value / quantum))
+            .join(':');
+        if (signature === lastRegionSignatureRef.current) return;
+        lastRegionSignatureRef.current = signature;
+
+        regionAbortRef.current?.abort();
+        const controller = new AbortController();
+        regionAbortRef.current = controller;
+        const target = controls.target;
+        setLoading(true);
+        sceneClientRef.current.region({
+            xMin: target.x - halfExtent,
+            xMax: target.x + halfExtent,
+            yMin: target.y - halfExtent,
+            yMax: target.y + halfExtent,
+            zMin: target.z - halfExtent,
+            zMax: target.z + halfExtent,
+        }, controller.signal)
+            .then(spatialScene => {
+                if (!spatialScene.nodes.length) return;
+                setScene(spatialScene);
+                setGraphData({ nodes: spatialScene.nodes, links: spatialScene.links });
+            })
+            .catch(error => {
+                if ((error as { name?: string }).name !== 'AbortError') setError((error as Error).message);
+            })
+            .finally(() => {
+                if (regionAbortRef.current === controller) regionAbortRef.current = null;
+                if (!controller.signal.aborted) setLoading(false);
+            });
+    };
 
     // State for tooltip
     const [hoveredNode] = useState<{
@@ -228,6 +279,7 @@ export default function Graph3DInstanced(props: Props) {
                 const allowed = new Set(selected);
                 const nodeIds = new Set(spatialScene.nodes.filter(n => n.type === 'community' || !n.type || allowed.has(n.type)).map(n => n.id));
                 const data = { nodes: spatialScene.nodes.filter(n => nodeIds.has(n.id)), links: spatialScene.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target)) };
+                lastRegionSignatureRef.current = null;
                 setScene(spatialScene);
                 setGraphData(data);
                 setInitialLoadComplete(true);
@@ -256,14 +308,26 @@ export default function Graph3DInstanced(props: Props) {
         return () => controller.abort();
     }, [activeTypes, load]);
 
-    // Approaching a landmark replaces the far overview with its complete,
-    // revision-pinned selectable neighborhood.
+    useEffect(() => () => regionAbortRef.current?.abort(), []);
+
+    // Approaching a landmark or search result replaces the far overview with
+    // its revision-pinned selectable neighborhood. Full-corpus entities do not
+    // need to be resident before search-to-flight can reach them.
     useEffect(() => {
-        if (!focusNodeId?.startsWith('c:')) return;
+        if (!focusNodeId) {
+            loadedFocusRef.current = null;
+            return;
+        }
+        if (loadedFocusRef.current === focusNodeId) return;
+        if (!focusNodeId.startsWith('c:') && graphData?.nodes.some(node => node.id === focusNodeId)) return;
         const controller = new AbortController();
         setLoading(true);
-        sceneClientRef.current.community(focusNodeId, 'near', controller.signal)
+        const request = focusNodeId.startsWith('c:')
+            ? sceneClientRef.current.community(focusNodeId, 'near', controller.signal)
+            : sceneClientRef.current.entity(focusNodeId, controller.signal);
+        request
             .then(spatialScene => {
+                loadedFocusRef.current = focusNodeId;
                 setScene(spatialScene);
                 setGraphData({ nodes: spatialScene.nodes, links: spatialScene.links });
             })
@@ -272,7 +336,7 @@ export default function Graph3DInstanced(props: Props) {
             })
             .finally(() => { if (!controller.signal.aborted) setLoading(false); });
         return () => controller.abort();
-    }, [focusNodeId]);
+    }, [focusNodeId, graphData?.nodes]);
 
     // Initialize Three.js scene
     useEffect(() => {
@@ -329,6 +393,8 @@ export default function Graph3DInstanced(props: Props) {
         }
         
         controlsRef.current = controls;
+        const handleControlsEnd = () => requestRegionRef.current(camera, controls);
+        controls.addEventListener('end', handleControlsEnd);
 
         // Add lights
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -451,12 +517,18 @@ export default function Graph3DInstanced(props: Props) {
 
             // Update label visibility and billboard orientation
             if (labelRendererRef.current && showLabelsRef.current && labelSetRef.current.size > 0) {
-                const cameraDistance = camera.position.length();
+                // Zoom is distance to the navigation target, not distance to
+                // the universe origin. The old origin check hid labels around
+                // any far-away community even after the camera arrived there.
+                const cameraDistance = camera.position.distanceTo(controls.target);
+                const labelDistance = sceneSourceRef.current === 'overview'
+                    ? Number.POSITIVE_INFINITY
+                    : DEFAULT_LOD_CONFIG.labelVisibilityThreshold;
                 labelRendererRef.current.updateVisibility(
                     camera,
                     labelSetRef.current,
                     cameraDistance,
-                    DEFAULT_LOD_CONFIG.labelVisibilityThreshold
+                    labelDistance
                 );
                 labelRendererRef.current.updateBillboard(camera);
             }
@@ -500,6 +572,7 @@ export default function Graph3DInstanced(props: Props) {
         return () => {
             window.removeEventListener('resize', handleResize);
             cancelAnimationFrame(animationId);
+            controls.removeEventListener('end', handleControlsEnd);
             controls.dispose();
             renderer.dispose();
             nodeRenderer.dispose();
@@ -657,6 +730,7 @@ export default function Graph3DInstanced(props: Props) {
         if (!points.length) return;
         const bounds = new THREE.Box3().setFromPoints(points);
         const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+        overviewRadiusRef.current = sphere.radius;
         const camera = cameraRef.current;
         const distance = Math.max(160, sphere.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.3);
         const direction = new THREE.Vector3(0.28, 0.18, 1).normalize();
@@ -691,18 +765,22 @@ export default function Graph3DInstanced(props: Props) {
         });
         
         // Prefer semantic navigation entities; limit to top N by weight
-        const preferred = weights.filter(
-            (x) => x.type === 'community' || x.type === 'subreddit' || x.type === 'user'
+        const preferred = weights.filter((x) =>
+            x.id === selectedId || x.type === 'community' || x.type === 'subreddit' || x.type === 'user'
         );
         preferred.sort(
             (a, b) => b.w - a.w || String(a.id).localeCompare(String(b.id))
         );
         
-        const TOP = Math.min(DEFAULT_LOD_CONFIG.maxLabels, preferred.length);
+        const semanticLimit = scene?.source === 'overview'
+            ? 40
+            : currentLODTier >= LODTier.HIGH ? DEFAULT_LOD_CONFIG.maxLabels : 80;
+        const TOP = Math.min(semanticLimit, preferred.length);
         const set = new Set<string>();
+        if (selectedId && filtered.nodes.some(node => node.id === selectedId)) set.add(selectedId);
         for (let i = 0; i < TOP; i++) set.add(String(preferred[i].id));
         return set;
-    }, [showLabels, filtered.nodes, degreeMap]);
+    }, [showLabels, filtered.nodes, degreeMap, selectedId, scene?.source, currentLODTier]);
 
     // Keep refs in sync with labelSet and showLabels
     useEffect(() => {
@@ -801,11 +879,19 @@ export default function Graph3DInstanced(props: Props) {
                         z: n.z || 0,
                     },
                     size,
+                    priority: n.id === selectedId
+                        ? 1000000
+                        : n.type === 'community' ? 100000 + value
+                        : n.type === 'subreddit' ? 10000 + value
+                        : n.type === 'user' ? 1000 + value
+                        : value,
+                    alwaysVisible: n.id === selectedId,
                 };
-            });
+            })
+            .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.id.localeCompare(b.id));
 
         labelRendererRef.current.setLabels(labelData);
-    }, [filtered.nodes, labelSet, degreeMap, showLabels, nodeRelSize]);
+    }, [filtered.nodes, labelSet, degreeMap, showLabels, nodeRelSize, selectedId]);
 
     // Initialize/update force simulation
     useEffect(() => {
@@ -1056,7 +1142,12 @@ export default function Graph3DInstanced(props: Props) {
             <div className='instrument-panel absolute left-3 top-20 z-10 flex items-center gap-2 rounded-full p-1.5 text-[10px] text-white md:left-5 md:top-24'>
                 <button
                     className='instrument-button rounded-full px-3 text-[10px]'
-                    onClick={() => load()}
+                    onClick={() => {
+                        onNodeSelect?.(undefined);
+                        loadedFocusRef.current = null;
+                        lastFramedRevisionRef.current = null;
+                        load();
+                    }}
                 >
                     World view
                 </button>

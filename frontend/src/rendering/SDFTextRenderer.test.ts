@@ -1,6 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
-import { SDFTextRenderer, type LabelData } from './SDFTextRenderer';
+import {
+  SDFTextRenderer,
+  renderableSpatialLabel,
+  type LabelData,
+} from './SDFTextRenderer';
+
+describe('renderableSpatialLabel', () => {
+  it('keeps bundled scripts and substitutes glyphs that would require a CDN fallback', () => {
+    expect(renderableSpatialLabel('AskReddit · Jokes · food')).toBe('AskReddit · Jokes · food');
+    expect(renderableSpatialLabel('κόσμος мир 宇宙')).toBe('κόσμος мир ??');
+  });
+
+  it('truncates by rendered characters', () => {
+    expect(renderableSpatialLabel('a'.repeat(29))).toBe(`${'a'.repeat(27)}…`);
+  });
+});
 
 // Mock troika-three-text to avoid test environment issues
 vi.mock('troika-three-text', () => {

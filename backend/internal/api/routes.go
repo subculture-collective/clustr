@@ -124,13 +124,16 @@ func NewRouter(q *db.Queries) *mux.Router {
 		r.Handle("/api/graph/overview", middleware.Gzip(http.HandlerFunc(revisionHandler.Overview))).Methods("GET")
 		r.Handle("/api/graph/region", middleware.Gzip(http.HandlerFunc(revisionHandler.Region))).Methods("GET")
 		r.Handle("/api/graph/community/{stable_id}", middleware.Gzip(http.HandlerFunc(revisionHandler.Community))).Methods("GET")
+		r.Handle("/api/graph/entity/{id}", middleware.Gzip(http.HandlerFunc(revisionHandler.Entity))).Methods("GET")
 		r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(revisionHandler.Diff))).Methods("GET")
+		r.Handle("/api/search", middleware.Gzip(middleware.ETag(http.HandlerFunc(revisionHandler.Search)))).Methods("GET")
+		r.Handle("/api/nodes/{id}", middleware.Gzip(middleware.ETag(http.HandlerFunc(revisionHandler.NodeDetails)))).Methods("GET")
 	}
 
 	// Compatibility names for the previous mutable tiered graph during rollback.
 	r.Handle("/api/graph/legacy-overview", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphOverview)))).Methods("GET")
 	r.Handle("/api/graph/legacy-region", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphRegion)))).Methods("GET")
-	if !cfg.RevisionReadsEnabled {
+	if q == nil || !cfg.RevisionReadsEnabled {
 		r.Handle("/api/graph/overview", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphOverview)))).Methods("GET")
 		r.Handle("/api/graph/region", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphRegion)))).Methods("GET")
 	}
@@ -142,17 +145,21 @@ func NewRouter(q *db.Queries) *mux.Router {
 	versionHandler := handlers.NewVersionHandler(q, graphCache)
 	r.Handle("/api/graph/version", middleware.Gzip(http.HandlerFunc(versionHandler.GetCurrentVersion))).Methods("GET")
 	r.Handle("/api/graph/legacy-diff", middleware.Gzip(http.HandlerFunc(versionHandler.GetDiffSince))).Methods("GET")
-	if !cfg.RevisionReadsEnabled {
+	if q == nil || !cfg.RevisionReadsEnabled {
 		r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(versionHandler.GetDiffSince))).Methods("GET")
 	}
 
 	// Search endpoint with gzip and ETag: GET /api/search?node=...
-	searchHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.SearchNode(q))))
-	r.Handle("/api/search", searchHandler).Methods("GET")
+	if q == nil || !cfg.RevisionReadsEnabled {
+		searchHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.SearchNode(q))))
+		r.Handle("/api/search", searchHandler).Methods("GET")
+	}
 
 	// Node details endpoint: GET /api/nodes/{id}
-	nodeDetailsHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.GetNodeDetails(q))))
-	r.Handle("/api/nodes/{id}", nodeDetailsHandler).Methods("GET")
+	if q == nil || !cfg.RevisionReadsEnabled {
+		nodeDetailsHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.GetNodeDetails(q))))
+		r.Handle("/api/nodes/{id}", nodeDetailsHandler).Methods("GET")
+	}
 
 	// Export endpoint with gzip and ETag: GET /api/export?format=json|csv
 	exportHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.ExportGraph(q))))
