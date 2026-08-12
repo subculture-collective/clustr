@@ -24,3 +24,9 @@
 - **LOD level**: the semantic level of detail selected for a view of the
   spatial world.
 - **Publication**: the atomic act that makes a validated graph revision active.
+- **Database export**: an immutable encrypted PostgreSQL custom archive plus a
+  manifest captured from the same exported snapshot.
+- **Database clone**: an isolated Kvant PostgreSQL instance restored from one
+  verified database export; it never shares production storage or credentials.
+- **Clone identity**: the unique `clustr-YYYYMMDDTHHMMSSZ-random` identifier
+  naming source export, transfer, restore, evidence, and explicit cleanup.

@@ -61,19 +61,23 @@ replace a post-deploy canary on Almaz.
 
 ## One-time release preparation
 
-1. Build and test the exact release checkout. Build all server, crawler,
+1. Create and verify a current production clone by following
+   [production-database-clone.md](production-database-clone.md). Run migrations
+   and the full calculation against that isolated Kvant clone before scheduling
+   a calculation against Almaz.
+2. Build and test the exact release checkout. Build all server, crawler,
    precalculate, migration, and frontend images from the same commit.
-2. Push immutable images and record their digests. Never use `latest` in the
+3. Push immutable images and record their digests. Never use `latest` in the
    Kvant unit.
-3. Copy this checkout to `/opt/clustr` on Kvant, preserving ownership by the
+4. Copy this checkout to `/opt/clustr` on Kvant, preserving ownership by the
    `onnwee` user. Install the unit and timer from `deploy/kvant/`.
-4. Create `/etc/clustr/kvant-precalculate.env` from the example, owned by
+5. Create `/etc/clustr/kvant-precalculate.env` from the example, owned by
    `root:onnwee` with mode `0640`. Set a percent-encoded database URL whose host is
    `127.0.0.1` and port is the configured tunnel port. Do not copy Reddit OAuth
    credentials into this file; the graph worker does not need them.
-5. Verify `ssh -o BatchMode=yes almaz true` as the service user and pin Almaz's
+6. Verify `ssh -o BatchMode=yes almaz true` as the service user and pin Almaz's
    host key before enabling the timer.
-6. Validate without starting a calculation:
+7. Validate without starting a calculation:
 
    ```bash
    sudo systemd-analyze verify /etc/systemd/system/clustr-precalculate.service

@@ -210,6 +210,10 @@ test-integration: ## Run integration tests (requires database)
 	@echo "==> Running integration tests..."
 	@cd backend && go test ./internal/graph -run Integration -v
 
+test-clone-pipeline: ## Validate production database-clone shell contracts
+	@bash -n scripts/clone/*.sh
+	@scripts/clone/test-validation.sh
+
 lint-backend: ## Run Go linters
 	@echo "Running go vet..."
 	@cd backend && go vet ./...

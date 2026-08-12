@@ -5,6 +5,8 @@ This document provides step-by-step procedures for common operational tasks and 
 ## Table of Contents
 
 - [Backup and Restore](#backup-and-restore)
+- [Production Database Clone](runbooks/production-database-clone.md)
+- [Almaz and Kvant Launch](runbooks/almaz-kvant-launch.md)
 - [Graph Precalculation](#graph-precalculation)
 - [Database Maintenance](#database-maintenance)
 - [Crawler Operations](#crawler-operations)
