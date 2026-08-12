@@ -8,10 +8,19 @@ services:
             POSTGRES_INITDB_ARGS: --data-checksums
         ports:
             - '127.0.0.1:5433:5432'
-        volumes:
-            - ./migrations/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
         healthcheck:
             test: ['CMD-SHELL', 'pg_isready -U testuser -d testdb']
             interval: 5s
             timeout: 5s
             retries: 5
+
+    test-migrate:
+        build:
+            context: .
+            dockerfile: Dockerfile.migrate
+        environment:
+            DATABASE_URL: postgres://testuser:testpass@test-db:5432/testdb?sslmode=disable
+        depends_on:
+            test-db:
+                condition: service_healthy
+        restart: 'no'

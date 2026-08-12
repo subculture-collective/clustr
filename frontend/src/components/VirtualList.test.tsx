@@ -125,9 +125,12 @@ describe('VirtualList', () => {
       />
     );
 
-    // Find the inner div that has the calculated total height
-    const innerContainer = container.querySelector('div > div > div') as HTMLElement;
-    expect(innerContainer).toHaveStyle({
+    const scrollContainer = container.firstElementChild as HTMLElement;
+    const spacer = scrollContainer.firstElementChild as HTMLElement;
+    const visibleItems = spacer.firstElementChild as HTMLElement;
+
+    expect(spacer).toHaveStyle({ height: '3000px' });
+    expect(visibleItems).toHaveStyle({
       position: 'absolute',
     });
   });

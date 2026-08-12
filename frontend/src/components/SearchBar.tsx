@@ -232,15 +232,15 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
   const getNodeColor = (type?: string) => {
     switch (type) {
       case 'subreddit':
-        return 'bg-green-500';
+        return 'bg-[#b6ff62]';
       case 'user':
-        return 'bg-blue-500';
+        return 'bg-[#68dcff]';
       case 'post':
-        return 'bg-orange-500';
+        return 'bg-[#ffc75f]';
       case 'comment':
-        return 'bg-pink-500';
+        return 'bg-[#ff7096]';
       default:
-        return 'bg-gray-500';
+        return 'bg-[#d8e7e3]';
     }
   };
 
@@ -248,20 +248,20 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
   const getNodeIcon = (type?: string) => {
     switch (type) {
       case 'subreddit':
-        return '🏷️';
+        return 'SR';
       case 'user':
-        return '👤';
+        return 'US';
       case 'post':
-        return '📝';
+        return 'PO';
       case 'comment':
-        return '💬';
+        return 'CO';
       default:
-        return '🔹';
+        return 'ID';
     }
   };
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative ${className}`} role="search">
       <div className="relative">
         <input
           ref={inputRef}
@@ -269,8 +269,9 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
           value={query}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Search nodes... (Ctrl+K or /)"
-          className="w-full px-4 py-2 bg-black/60 text-white border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+          placeholder="Search nodes in the universe"
+          aria-label="Search communities, people, posts, and comments"
+          className="instrument-panel h-12 w-full rounded-full px-5 pr-20 text-sm text-white placeholder:text-[#61706e] md:h-14"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={isOpen && results.length > 0}
@@ -283,7 +284,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
         />
         {isLoading && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+            <div className="h-4 w-4 animate-spin rounded-full border border-[#b6ff62]/30 border-t-[#b6ff62]"></div>
           </div>
         )}
         {!isLoading && query && (
@@ -302,7 +303,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
               setResults([]);
               setIsOpen(false);
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+            className="instrument-button absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full text-[#9aaba8]"
             aria-label="Clear search"
           >
             ✕
@@ -315,7 +316,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
           ref={dropdownRef}
           id="search-results-listbox"
           role="listbox"
-          className="absolute top-full mt-2 w-full bg-black/90 border border-gray-700 rounded-lg shadow-xl max-h-96 overflow-y-auto z-50"
+          className="instrument-panel absolute top-full z-50 mt-2 max-h-96 w-full overflow-y-auto rounded-2xl p-2"
         >
           {results.map((result, index) => {
             const isSelected = index === selectedIndex;
@@ -328,23 +329,19 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
                 aria-selected={isSelected}
                 onClick={() => selectNode(result)}
                 onMouseEnter={() => setSelectedIndex(index)}
-                className={`w-full px-4 py-3 text-left flex items-center gap-3 border-b border-gray-800 last:border-b-0 transition-colors ${
-                  isSelected ? 'bg-blue-600/30' : 'hover:bg-gray-800/50'
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${
+                  isSelected ? 'bg-white/[.08]' : 'hover:bg-white/[.04]'
                 }`}
               >
-                <div className="flex-shrink-0 text-xl">{getNodeIcon(result.type)}</div>
+                <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold text-[#030506] ${getNodeColor(result.type)}`}>{getNodeIcon(result.type)}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-white font-medium truncate">{result.name}</span>
-                    <span
-                      className={`px-2 py-0.5 text-xs rounded ${getNodeColor(
-                        result.type
-                      )} text-white flex-shrink-0`}
-                    >
+                    <span className="truncate font-medium text-white">{result.name}</span>
+                    <span className="instrument-label flex-shrink-0">
                       {result.type || 'unknown'}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
+                  <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-[#61706e]">
                     <span className="truncate">{result.id}</span>
                     {result.val !== undefined && (
                       <>
@@ -355,7 +352,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
                   </div>
                 </div>
                 {isSelected && (
-                  <div className="flex-shrink-0 text-blue-400 text-sm">↵</div>
+                  <div className="flex-shrink-0 font-mono text-xs text-[#b6ff62]">ENTER</div>
                 )}
               </button>
             );
@@ -366,7 +363,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
       {isOpen && query && results.length === 0 && !isLoading && (
         <div
           ref={dropdownRef}
-          className="absolute top-full mt-2 w-full bg-black/90 border border-gray-700 rounded-lg shadow-xl px-4 py-3 text-gray-400 text-sm z-50"
+          className="instrument-panel absolute top-full z-50 mt-2 w-full rounded-2xl px-5 py-4 text-sm text-[#9aaba8]"
         >
           No results found for "{query}"
         </div>

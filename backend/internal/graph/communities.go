@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"sort"
 
+	"github.com/lib/pq"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 )
 
@@ -33,6 +33,31 @@ type HierarchyLevel struct {
 	CommunityToParent  map[int]int
 	CommunityCentroids map[int][3]float64 // community_id -> [x, y, z]
 	Modularity         float64
+}
+
+// listGraphLinksAmongCapped keeps the hierarchy worker's Go adjacency map
+// bounded even when the workspace retains a far larger detailed graph.  The
+// ordering makes the sampled induced graph repeatable between runs.
+func listGraphLinksAmongCapped(ctx context.Context, queries *db.Queries, nodeIDs []string, limit int) ([]db.ListGraphLinksAmongRow, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("community link cap must be positive")
+	}
+	rows, err := queries.DB().QueryContext(ctx, `SELECT source,target FROM graph_links
+WHERE source=ANY($1::text[]) AND target=ANY($1::text[])
+ORDER BY source,target LIMIT $2`, pq.Array(nodeIDs), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	links := make([]db.ListGraphLinksAmongRow, 0)
+	for rows.Next() {
+		var link db.ListGraphLinksAmongRow
+		if err := rows.Scan(&link.Source, &link.Target); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, rows.Err()
 }
 
 // detectCommunities performs Louvain community detection on the graph
@@ -119,12 +144,10 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 		improved = false
 		iteration++
 
-		// Shuffle nodes for better results
+		// Stable traversal and tie-breaking make identical projections repeatable.
 		shuffled := make([]string, len(nodeIDs))
 		copy(shuffled, nodeIDs)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-		})
+		sort.Strings(shuffled)
 
 		for _, nodeID := range shuffled {
 			currentCommunity := nodeToCommunity[nodeID]
@@ -141,7 +164,12 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 			bestGain := 0.0
 
 			// Try moving to each neighboring community
+			orderedCommunities := make([]int, 0, len(neighborCommunities))
 			for targetCommunity := range neighborCommunities {
+				orderedCommunities = append(orderedCommunities, targetCommunity)
+			}
+			sort.Ints(orderedCommunities)
+			for _, targetCommunity := range orderedCommunities {
 				if targetCommunity == currentCommunity {
 					continue
 				}
@@ -337,8 +365,7 @@ func (s *Service) storeCommunities(ctx context.Context, queries *db.Queries, res
 			Modularity: sql.NullFloat64{Float64: result.Modularity, Valid: true},
 		})
 		if err != nil {
-			log.Printf("⚠️ failed to create community %d: %v", comm.ID, err)
-			continue
+			return nil, fmt.Errorf("create community %d: %w", comm.ID, err)
 		}
 
 		// Insert members and map them to the database community ID
@@ -347,7 +374,7 @@ func (s *Service) storeCommunities(ctx context.Context, queries *db.Queries, res
 				CommunityID: dbComm.ID,
 				NodeID:      memberID,
 			}); err != nil {
-				log.Printf("⚠️ failed to add member %s to community %d: %v", memberID, dbComm.ID, err)
+				return nil, fmt.Errorf("add member %s to community %d: %w", memberID, dbComm.ID, err)
 			}
 			nodeToDB[memberID] = dbComm.ID
 		}
@@ -381,12 +408,37 @@ func (s *Service) storeCommunities(ctx context.Context, queries *db.Queries, res
 			TargetCommunityID: key[1],
 			Weight:            int32(weight),
 		}); err != nil {
-			log.Printf("⚠️ failed to create community link %d->%d: %v", key[0], key[1], err)
+			return nil, fmt.Errorf("create community link %d->%d: %w", key[0], key[1], err)
 		}
 	}
 
 	log.Printf("✅ Stored %d communities with inter-community links", len(result.Communities))
 	return nodeToDB, nil
+}
+
+func communitiesFromHierarchy(hierarchy []HierarchyLevel) *CommunityResult {
+	if len(hierarchy) == 0 {
+		return &CommunityResult{NodeToCommunity: map[string]int{}}
+	}
+	level := hierarchy[0]
+	if len(hierarchy) > 1 {
+		level = hierarchy[1]
+	}
+	byID := make(map[int][]string)
+	for nodeID, communityID := range level.NodeToCommunity {
+		byID[communityID] = append(byID[communityID], nodeID)
+	}
+	ids := make([]int, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	communities := make([]Community, 0, len(ids))
+	for _, id := range ids {
+		sort.Strings(byID[id])
+		communities = append(communities, Community{ID: id, Members: byID[id], Label: fmt.Sprintf("Community %d", id+1)})
+	}
+	return &CommunityResult{Communities: communities, NodeToCommunity: level.NodeToCommunity, Modularity: level.Modularity}
 }
 
 // computeAndStoreEdgeBundles computes edge bundle metadata for inter-community connections
@@ -597,6 +649,20 @@ func (s *Service) detectHierarchicalCommunities(ctx context.Context, queries *db
 
 		if len(uniqueCommunities) <= 1 || len(uniqueCommunities) >= len(currentNodeIDs) {
 			log.Printf("⚠️ Level %d: clustering not effective (%d communities for %d nodes), stopping hierarchy", level, len(uniqueCommunities), len(currentNodeIDs))
+			if level > 1 && len(hierarchy) > 1 {
+				rootMembers := make(map[string]int, len(nodeIDs))
+				for _, nodeID := range nodeIDs {
+					rootMembers[nodeID] = 0
+				}
+				hierarchy = append(hierarchy, HierarchyLevel{
+					Level:              level,
+					NodeToCommunity:    rootMembers,
+					CommunityToParent:  map[int]int{},
+					CommunityCentroids: s.calculateCentroidsForLevel(ctx, queries, rootMembers, nodes),
+					Modularity:         hierarchy[len(hierarchy)-1].Modularity,
+				})
+				log.Printf("✅ Level %d: added deterministic world root", level)
+			}
 			break
 		}
 
@@ -746,12 +812,10 @@ func runSinglePassLouvain(nodeIDs []string, adjacency map[string]map[string]int,
 		improved = false
 		iteration++
 
-		// Shuffle nodes for better results
+		// Stable traversal and tie-breaking make identical projections repeatable.
 		shuffled := make([]string, len(nodeIDs))
 		copy(shuffled, nodeIDs)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-		})
+		sort.Strings(shuffled)
 
 		for _, nodeID := range shuffled {
 			currentCommunity := nodeToCommunity[nodeID]
@@ -768,7 +832,12 @@ func runSinglePassLouvain(nodeIDs []string, adjacency map[string]map[string]int,
 			bestGain := 0.0
 
 			// Try moving to each neighboring community
+			orderedCommunities := make([]int, 0, len(neighborCommunities))
 			for targetCommunity := range neighborCommunities {
+				orderedCommunities = append(orderedCommunities, targetCommunity)
+			}
+			sort.Ints(orderedCommunities)
+			for _, targetCommunity := range orderedCommunities {
 				if targetCommunity == currentCommunity {
 					continue
 				}

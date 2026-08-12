@@ -1,34 +1,63 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "🚀 Pulling latest changes..."
-git -C /home/onnwee/projects/reddit-cluster-map pull origin deploy
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+compose_file="${repo_root}/backend/docker-compose.yml"
+phase=${1:-}
+env_file=${CLUSTR_ENV_FILE:-}
 
-echo "📦 Building and restarting containers..."
-cd /home/onnwee/projects/reddit-cluster-map
+usage() {
+  cat >&2 <<'EOF'
+usage: CLUSTR_ENV_FILE=/secure/path/clustr.env scripts/deploy.sh PHASE
 
-# Check if frontend has changed since last deploy
-if git diff --name-only HEAD@{1} HEAD | grep '^frontend/'; then
-  echo "🌐 Frontend changes detected, rebuilding..."
-  cd frontend
-  npm install
-  npm run build
-  cd ../backend
-else
-  echo "🌐 No frontend changes detected, skipping build."
-  cd backend
+PHASE is one of:
+  prepare        validate configuration and build release images only
+  migrate        run the migration service (requires CONFIRM_CLUSTR_MIGRATION=yes)
+  start-reads    start API, backup, and frontend; never starts the crawler
+  start-crawler  start the crawler (requires CONFIRM_CLUSTR_CRAWLER=yes)
+  status         show compose service state
+
+Use docs/runbooks/almaz-kvant-launch.md for backup, first publication,
+readiness, browser validation, and rollback gates. This script intentionally
+does not pull Git, run raw schema SQL, start the local precalculator, or enable
+the crawler as a side effect.
+EOF
+  exit 64
+}
+
+if [[ -z ${phase} || -z ${env_file} || ! -r ${env_file} ]]; then
+  usage
 fi
 
-# Build and restart services first
-echo "🏗️ Building and restarting services..."
-docker compose up -d --build
+export CLUSTR_ENV_FILE="${env_file}"
+compose=(docker compose --env-file "${env_file}" -f "${compose_file}")
 
-# Run database migrations inside the container
-echo "🔄 Running database migrations..."
-docker compose exec -T db psql -U postgres -d reddit_cluster -f /docker-entrypoint-initdb.d/migrations/schema.sql
-
-# Start the crawler service
-echo "🤖 Starting crawler service..."
-docker compose up -d crawler
-
-echo "✅ Deployment complete."
+case "${phase}" in
+  prepare)
+    "${compose[@]}" config --quiet
+    "${compose[@]}" build api crawler migrate precalculate backup reddit_frontend
+    ;;
+  migrate)
+    if [[ ${CONFIRM_CLUSTR_MIGRATION:-} != yes ]]; then
+      echo "set CONFIRM_CLUSTR_MIGRATION=yes after the verified backup is complete" >&2
+      exit 65
+    fi
+    "${compose[@]}" run --rm migrate
+    ;;
+  start-reads)
+    "${compose[@]}" up -d api backup reddit_frontend
+    ;;
+  start-crawler)
+    if [[ ${CONFIRM_CLUSTR_CRAWLER:-} != yes ]]; then
+      echo "set CONFIRM_CLUSTR_CRAWLER=yes only after the clone/staging canary passes" >&2
+      exit 65
+    fi
+    "${compose[@]}" up -d crawler
+    ;;
+  status)
+    "${compose[@]}" ps
+    ;;
+  *)
+    usage
+    ;;
+esac

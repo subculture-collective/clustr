@@ -683,16 +683,17 @@ export class Octree<T> {
         if (!this.root) return;
 
         // Keep expanding until position is contained
-        while (!this.root.bounds.containsPoint(position)) {
+        while (this.root && !this.root.bounds.containsPoint(position)) {
+            const currentRoot: OctreeNode<T> = this.root;
             // Double the size of the root bounds
-            const center = this.root.bounds.getCenter();
-            const size = this.root.bounds.getSize();
+            const center: THREE.Vector3 = currentRoot.bounds.getCenter();
+            const size: THREE.Vector3 = currentRoot.bounds.getSize();
             const maxSize = Math.max(size.x, size.y, size.z);
 
             const newSize = maxSize * 2;
             const halfSize = newSize / 2;
 
-            const newMin = new THREE.Vector3(
+            const newMin: THREE.Vector3 = new THREE.Vector3(
                 center.x - halfSize,
                 center.y - halfSize,
                 center.z - halfSize,
@@ -703,7 +704,7 @@ export class Octree<T> {
                 center.z + halfSize,
             );
 
-            const newRoot = new OctreeNode<T>(new AABB(newMin, newMax), 0);
+            const newRoot: OctreeNode<T> = new OctreeNode<T>(new AABB(newMin, newMax), 0);
 
             // Reinsert all items into new root
             const allItems = this.getAllItems();
@@ -712,7 +713,7 @@ export class Octree<T> {
             this.totalItems = 0;
 
             for (const item of allItems) {
-                this.insertIntoNode(this.root, item);
+                this.insertIntoNode(newRoot, item);
                 this.itemMap.set(item.id, item);
                 this.totalItems++;
             }

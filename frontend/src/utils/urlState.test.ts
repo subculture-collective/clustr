@@ -8,12 +8,16 @@ import {
 
 describe('urlState', () => {
   let originalLocation: Location;
+  const mutableWindow = window as unknown as {
+    location?: Location;
+    history?: History;
+  };
 
   beforeEach(() => {
     // Save original location
     originalLocation = window.location;
     // Use delete to allow reassignment
-    delete (window as any).location;
+    delete mutableWindow.location;
   });
 
   afterEach(() => {
@@ -113,8 +117,8 @@ describe('urlState', () => {
 
     it('writes view mode to URL', () => {
       const mockReplaceState = vi.fn();
-      delete (window as any).history;
-      window.history = { replaceState: mockReplaceState } as any;
+      delete mutableWindow.history;
+      mutableWindow.history = { replaceState: mockReplaceState } as unknown as History;
       window.location = { search: '', pathname: '/test' } as Location;
 
       const state: AppState = { viewMode: '3d' };
@@ -127,8 +131,8 @@ describe('urlState', () => {
 
     it('writes filters to URL', () => {
       const mockReplaceState = vi.fn();
-      delete (window as any).history;
-      window.history = { replaceState: mockReplaceState } as any;
+      delete mutableWindow.history;
+      mutableWindow.history = { replaceState: mockReplaceState } as unknown as History;
       window.location = { search: '', pathname: '/test' } as Location;
 
       const state: AppState = {
@@ -150,8 +154,8 @@ describe('urlState', () => {
 
     it('writes camera positions to URL', () => {
       const mockReplaceState = vi.fn();
-      delete (window as any).history;
-      window.history = { replaceState: mockReplaceState } as any;
+      delete mutableWindow.history;
+      mutableWindow.history = { replaceState: mockReplaceState } as unknown as History;
       window.location = { search: '', pathname: '/test' } as Location;
 
       const state: AppState = {
@@ -167,8 +171,8 @@ describe('urlState', () => {
 
     it('writes size attenuation to URL', () => {
       const mockReplaceState = vi.fn();
-      delete (window as any).history;
-      window.history = { replaceState: mockReplaceState } as any;
+      delete mutableWindow.history;
+      mutableWindow.history = { replaceState: mockReplaceState } as unknown as History;
       window.location = { search: '', pathname: '/test' } as Location;
 
       const state: AppState = { sizeAttenuation: true };
@@ -180,8 +184,8 @@ describe('urlState', () => {
 
     it('writes size attenuation disabled to URL', () => {
       const mockReplaceState = vi.fn();
-      delete (window as any).history;
-      window.history = { replaceState: mockReplaceState } as any;
+      delete mutableWindow.history;
+      mutableWindow.history = { replaceState: mockReplaceState } as unknown as History;
       window.location = { search: '', pathname: '/test' } as Location;
 
       const state: AppState = { sizeAttenuation: false };

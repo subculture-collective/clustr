@@ -78,6 +78,8 @@ frontend/dist/stats.json
 # Playwright test artifacts
 frontend/playwright-report/
 frontend/test-results/
+.playwright-cli/
+output/playwright/
 # Keep baseline screenshots for visual regression tests
 !frontend/e2e/**/*.png
 

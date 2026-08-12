@@ -1,6 +1,34 @@
 package crawler
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+func TestCrawlCommentsContextRejectsHTTPError(t *testing.T) {
+	old := authenticatedGetWithContext
+	defer func() { authenticatedGetWithContext = old }()
+	authenticatedGetWithContext = func(context.Context, string) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Body: io.NopCloser(strings.NewReader(`{"message":"slow down"}`))}, nil
+	}
+	if _, err := CrawlCommentsContext(context.Background(), "abc"); err == nil {
+		t.Fatal("expected HTTP error")
+	}
+}
+
+func TestCrawlCommentsContextRejectsMalformedListing(t *testing.T) {
+	old := authenticatedGetWithContext
+	defer func() { authenticatedGetWithContext = old }()
+	authenticatedGetWithContext = func(context.Context, string) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(`[{"data":{}}]`))}, nil
+	}
+	if _, err := CrawlCommentsContext(context.Background(), "abc"); err == nil {
+		t.Fatal("expected malformed listing error")
+	}
+}
 
 func TestParseCommentsWithLimit_Depth0(t *testing.T) {
 	var children []interface{}

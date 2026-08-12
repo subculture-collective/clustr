@@ -34,6 +34,7 @@ export interface PhysicsConfig {
     chargeStrength: number;
     linkDistance: number;
     velocityDecay: number;
+    cooldownTicks?: number;
     collisionRadius?: number;
     autoTune?: boolean; // Auto-scale physics parameters based on node count
 }
@@ -220,24 +221,6 @@ export class ForceSimulation {
      */
     private getAutoTunedCooldownTicks(nodeCount: number): number {
         return Math.max(200, Math.floor(nodeCount / 100));
-    }
-
-    /**
-     * Clamp velocity to prevent runaway nodes
-     */
-    private clampVelocity(node: SimNode): void {
-        if (node.vx !== undefined && node.vy !== undefined) {
-            const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
-            if (speed > ForceSimulation.MAX_VELOCITY) {
-                const scale = ForceSimulation.MAX_VELOCITY / speed;
-                node.vx *= scale;
-                node.vy *= scale;
-                // Also clamp z velocity if present
-                if (node.vz !== undefined) {
-                    node.vz *= scale;
-                }
-            }
-        }
     }
 
     /**

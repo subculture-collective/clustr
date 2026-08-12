@@ -90,27 +90,24 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
     return () => {
       abortController.abort();
     };
-  }, [selected?.id]);
+  }, [selected]);
+
+  const hasConnectionsCheck = Boolean(
+    (typeof selected?.degree === "number" && selected.degree > 0) ||
+    (selected?.neighbors && selected.neighbors.length > 0) ||
+    (nodeDetails?.neighbors && nodeDetails.neighbors.length > 0)
+  );
 
   // Trigger slide-in animation when component mounts/unmounts
   useEffect(() => {
-    if (!selected || (!hasConnectionsCheck() && !loading)) {
+    if (!selected || (!hasConnectionsCheck && !loading)) {
       setIsVisible(false);
     } else {
       // Delay to ensure CSS transition works
       const timer = setTimeout(() => setIsVisible(true), 10);
       return () => clearTimeout(timer);
     }
-  }, [selected, loading]);
-
-  // Helper to check connections without using state that's set later
-  const hasConnectionsCheck = () => {
-    return (
-      (typeof selected?.degree === "number" && selected.degree > 0) ||
-      (selected?.neighbors && selected.neighbors.length > 0) ||
-      (nodeDetails && nodeDetails.neighbors && nodeDetails.neighbors.length > 0)
-    );
-  };
+  }, [selected, loading, hasConnectionsCheck]);
 
   if (!selected) return null;
 
@@ -130,18 +127,17 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
                  (selected.degree !== undefined ? selected.degree : neighbors.length);
   
   // Type guard to check if neighbors are NeighborInfo (with degree field)
-  const isNeighborInfo = (n: any): n is NeighborInfo => 'degree' in n && typeof n.degree === 'number';
+  const isNeighborInfo = (n: unknown): n is NeighborInfo => typeof n === 'object' && n !== null && 'degree' in n && typeof (n as { degree?: unknown }).degree === 'number';
 
   return (
     <div className={`fixed z-30 pointer-events-none
       ${isMobile 
-        ? 'bottom-0 left-0 right-0 top-auto h-[70vh]' /* Mobile: bottom sheet */
-        : 'right-0 top-0 h-full' /* Desktop: right sidebar */
+        ? 'bottom-20 left-3 right-3 top-auto h-[60vh]'
+        : 'right-5 top-24 h-[calc(100vh-8.5rem)]'
       }`}>
       <div 
-        className={`h-full bg-gray-900/95 backdrop-blur-sm text-white shadow-2xl 
-                   transition-transform duration-300 ease-in-out pointer-events-auto
-                   border-l border-gray-700 flex flex-col ${
+        className={`instrument-panel pointer-events-auto flex h-full flex-col overflow-hidden rounded-2xl text-white
+                   transition-transform duration-300 ease-in-out ${
                      isMobile 
                        ? `w-full ${isVisible ? 'translate-y-0' : 'translate-y-full'}` /* Mobile: slide up */
                        : `w-96 ${isVisible ? 'translate-x-0' : 'translate-x-full'}` /* Desktop: slide left */
@@ -151,11 +147,11 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
       >
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b border-gray-700">
-          <h3 className="font-semibold text-lg" id="inspector-heading">Node Inspector</h3>
+          <div><span className="sr-only">Node Inspector</span><p className="instrument-label">Attention lock</p><h3 className="mt-1 font-semibold text-lg" id="inspector-heading">{displayName}</h3></div>
           <button
             className="text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-800"
             onClick={onClear}
-            aria-label="Close inspector panel"
+            aria-label="Close inspector"
           >
             <span aria-hidden="true">✕</span>
           </button>
@@ -232,11 +228,6 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
               {activeTab === "overview" && (
                 <div className="space-y-3">
                   <div className="bg-gray-800/50 rounded-lg p-3 space-y-2">
-                    <div>
-                      <span className="text-xs text-gray-400 uppercase tracking-wide">Name</span>
-                      <p className="text-sm font-medium break-words">{displayName}</p>
-                    </div>
-                    
                     {displayType && (
                       <div>
                         <span className="text-xs text-gray-400 uppercase tracking-wide">Type</span>

@@ -12,10 +12,10 @@ interface Props {
 }
 
 const NODE_TYPE_COLORS = [
-  { key: "subreddit", label: "Subreddit", color: "#4ade80" },
-  { key: "user", label: "User", color: "#60a5fa" },
-  { key: "post", label: "Post", color: "#f59e0b" },
-  { key: "comment", label: "Comment", color: "#f43f5e" },
+  { key: "subreddit", label: "Subreddit", color: "#78d6b0" },
+  { key: "user", label: "User", color: "#69a7d8" },
+  { key: "post", label: "Post", color: "#e6bd72" },
+  { key: "comment", label: "Comment", color: "#d47e96" },
 ] as const;
 
 export default function Legend({ filters, useCommunityColors, communityCount }: Props) {
@@ -24,7 +24,7 @@ export default function Legend({ filters, useCommunityColors, communityCount }: 
 
   return (
     <div 
-      className={`absolute z-20 bg-black/70 text-white p-3 rounded shadow
+      className={`instrument-panel absolute z-20 rounded-xl p-3 text-white
         ${isMobile 
           ? 'bottom-20 left-2 right-2 mx-auto max-w-xs' /* Mobile: above bottom sheet */
           : 'bottom-2 left-2' /* Desktop: bottom-left */
@@ -32,7 +32,7 @@ export default function Legend({ filters, useCommunityColors, communityCount }: 
       role="region"
       aria-label="Graph legend"
     >
-      <div className="text-xs font-semibold mb-2 text-white/90">Legend</div>
+      <div className="instrument-label mb-2"><span className="sr-only">Legend</span>Visible signals</div>
       
       {/* Node Types */}
       {!useCommunityColors && (
@@ -59,16 +59,16 @@ export default function Legend({ filters, useCommunityColors, communityCount }: 
               {communityCount ? `${communityCount} communities` : "Communities"}
             </span>
           </div>
-          <div className="text-xs text-white/60 mt-1">
+          <div className="mt-1 text-xs text-[#9aaba8]">
             Colors by community detection
           </div>
         </div>
       )}
 
       {/* Size Legend */}
-      <div className="mt-3 pt-2 border-t border-white/20">
-        <div className="text-xs text-white/70">
-          Node size = degree (connections)
+      <div className="mt-3 border-t border-white/10 pt-2">
+        <div className="text-xs text-[#9aaba8]">
+          <span className="sr-only">Node size = degree (connections)</span>Radius = entity weight
         </div>
       </div>
     </div>

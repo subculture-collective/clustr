@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ var (
 )
 
 func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
+	_, err := executeJob(ctx, q, job)
+	return err
+}
+
+func executeJob(ctx context.Context, q *db.Queries, job db.CrawlJob) (AttemptResult, error) {
+	result := AttemptResult{Outcome: OutcomeComplete}
 	ctx, span := tracing.StartSpan(ctx, "crawler.handleJob")
 	defer span.End()
 
@@ -50,7 +57,7 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 	if err := q.MarkCrawlJobStarted(ctx, job.ID); err != nil {
 		logger.WarnContext(ctx, "Failed to update job status to crawling", "error", err, "job_id", job.ID)
 		span.RecordError(err)
-		return err
+		return result, err
 	}
 
 	// Get subreddit name from ID
@@ -62,13 +69,13 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 		jobStatus = "failed"
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to get subreddit")
-		return err
+		return result, err
 	}
 
 	span.SetAttributes(attribute.String("subreddit", subreddit.Name))
 	logger.InfoContext(ctx, "Crawling subreddit", "subreddit", subreddit.Name)
 
-	info, posts, err := CrawlSubreddit(subreddit.Name)
+	info, posts, err := CrawlSubredditContext(ctx, subreddit.Name)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to crawl subreddit", "error", err, "subreddit", subreddit.Name)
 		// Update job status to failed
@@ -76,7 +83,7 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 		jobStatus = "failed"
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "crawl failed")
-		return err
+		return result, err
 	}
 
 	logger.InfoContext(ctx, "Crawled subreddit successfully",
@@ -103,7 +110,7 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 		jobStatus = "failed"
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "upsert failed")
-		return err
+		return result, err
 	}
 	logger.DebugContext(ctx, "Updated subreddit info", "subreddit", subreddit.Name)
 
@@ -118,16 +125,26 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 		// Update job status to failed
 		_ = q.MarkCrawlJobFailed(ctx, job.ID)
 		jobStatus = "failed"
-		return err
+		return result, err
 	}
 	log.Printf("✅ Stored %d posts", len(insertedPosts))
+	result.Posts = len(insertedPosts)
+	result.ItemFailures += len(posts) - len(insertedPosts)
 
-	if err := crawlAndStoreComments(ctx, q, job.SubredditID, posts, utils.GetEnvAsInt("MAX_COMMENT_DEPTH", 5), insertedPosts); err != nil {
+	comments, commentFailures, err := crawlAndStoreComments(ctx, q, job.SubredditID, posts, utils.GetEnvAsInt("MAX_COMMENT_DEPTH", 5), insertedPosts)
+	result.Comments = comments
+	result.ItemFailures += commentFailures
+	if err != nil {
 		log.Printf("⚠️ Failed to crawl and store comments: %v", err)
 		// Update job status to failed
 		_ = q.MarkCrawlJobFailed(ctx, job.ID)
 		jobStatus = "failed"
-		return err
+		return result, err
+	}
+	if result.ItemFailures > 0 {
+		result.Outcome = OutcomePartial
+		result.ErrorClass = "optional_item_failures"
+		result.ErrorMessage = fmt.Sprintf("%d post/comment items were unavailable or rejected", result.ItemFailures)
 	}
 
 	enqueueLinkedSubreddits(ctx, q, posts)
@@ -139,11 +156,11 @@ func handleJob(ctx context.Context, q *db.Queries, job db.CrawlJob) error {
 	if err := q.MarkCrawlJobSuccess(ctx, job.ID); err != nil {
 		log.Printf("⚠️ Failed to update job status to success: %v", err)
 		jobStatus = "failed"
-		return err
+		return result, err
 	}
 
 	jobStatus = "success"
-	return nil
+	return result, nil
 }
 
 func crawlAndStorePosts(ctx context.Context, q *db.Queries, subredditID int32, posts []Post) (map[string]bool, error) {
@@ -194,10 +211,11 @@ func crawlAndStoreComments(
 	posts []Post,
 	maxDepth int,
 	insertedPosts map[string]bool,
-) error {
+) (int, int, error) {
 	authorSet := make(map[string]bool)
 	totalComments := 0
 	totalSkipped := 0
+	threadFailures := 0
 
 	for _, post := range posts {
 		insertedThisPost := 0
@@ -211,9 +229,10 @@ func crawlAndStoreComments(
 			continue
 		}
 
-		comments, err := CrawlComments(postID)
+		comments, err := CrawlCommentsContext(ctx, postID)
 		if err != nil {
 			log.Printf("⚠️ Failed to fetch comments for %s: %v", post.Permalink, err)
+			threadFailures++
 			continue
 		}
 
@@ -284,7 +303,7 @@ func crawlAndStoreComments(
 
 	log.Printf("💬 Total comments processed: %d, Total skipped: %d", totalComments, totalSkipped)
 
-	// Trigger discovery from authors
+	// Trigger durable discovery from authors
 	var authors []string
 	for author := range authorSet {
 		authors = append(authors, author)
@@ -297,7 +316,7 @@ func crawlAndStoreComments(
 		Enabled:    utils.GetEnvAsBool("FETCH_USER_SUBREDDITS", true),
 	})
 
-	return nil
+	return totalComments - totalSkipped, totalSkipped + threadFailures, nil
 }
 
 func enqueueLinkedSubreddits(ctx context.Context, q *db.Queries, posts []Post) {
@@ -318,15 +337,13 @@ func enqueueLinkedSubreddits(ctx context.Context, q *db.Queries, posts []Post) {
 			continue
 		}
 
-		// Then enqueue the crawl job
-		if err := q.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{
-			SubredditID: subreddit,
-			EnqueuedBy:  sql.NullString{String: "crawler", Valid: true},
-		}); err != nil {
-			log.Printf("⚠️ Failed to enqueue %s: %v", sub, err)
+		// Mentions receive a stronger score than author-history evidence, but
+		// promotion remains subject to the shared daily budget.
+		if err := recordDiscoveryCandidate(ctx, q, subreddit, "mention", "post_text", 10); err != nil {
+			log.Printf("⚠️ Failed to record mentioned subreddit %s: %v", sub, err)
 		} else {
 			enqueuedCount++
 		}
 	}
-	log.Printf("✅ Enqueued %d/%d linked subreddits", enqueuedCount, len(linked))
+	log.Printf("✅ Recorded %d/%d linked subreddit candidates", enqueuedCount, len(linked))
 }

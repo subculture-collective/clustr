@@ -40,8 +40,9 @@ func TestIntegration_SpatialQueries_BoundingBox(t *testing.T) {
 		{"node_outside", "Outside", "50", 100.0, 100.0, 0.0},
 	}
 
-	// Clear test data
-	_, err = conn.ExecContext(ctx, "DELETE FROM graph_nodes WHERE id LIKE 'node_%'")
+	// Spatial queries are intentionally global, so isolate the workspace rather
+	// than allowing graph rows from another integration case to affect counts.
+	_, err = conn.ExecContext(ctx, "TRUNCATE graph_nodes, graph_links CASCADE")
 	if err != nil {
 		t.Fatalf("failed to clear test data: %v", err)
 	}

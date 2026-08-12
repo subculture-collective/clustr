@@ -46,14 +46,14 @@ func DoWithRetryFactoryObs(client *http.Client, build func() (*http.Request, err
 	}
 	baseDelay := cfg.HTTPRetryBase
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if pre != nil {
-			if err := pre(context.Background(), attempt); err != nil {
-				return nil, err
-			}
-		}
 		req, err := build()
 		if err != nil {
 			return nil, err
+		}
+		if pre != nil {
+			if err := pre(req.Context(), attempt); err != nil {
+				return nil, err
+			}
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -107,7 +107,9 @@ func DoWithRetryFactoryObs(client *http.Client, build func() (*http.Request, err
 					if obs != nil {
 						obs(AttemptInfo{Attempt: attempt, Method: req.Method, URL: req.URL.String(), Status: resp.StatusCode, Wait: wait})
 					}
-					time.Sleep(wait)
+					if err := waitContext(req.Context(), wait); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				if t, err := http.ParseTime(ra); err == nil {
@@ -121,7 +123,9 @@ func DoWithRetryFactoryObs(client *http.Client, build func() (*http.Request, err
 						if obs != nil {
 							obs(AttemptInfo{Attempt: attempt, Method: req.Method, URL: req.URL.String(), Status: resp.StatusCode, Wait: delta})
 						}
-						time.Sleep(delta)
+						if err := waitContext(req.Context(), delta); err != nil {
+							return nil, err
+						}
 						continue
 					}
 				}
@@ -138,7 +142,20 @@ func DoWithRetryFactoryObs(client *http.Client, build func() (*http.Request, err
 		if obs != nil {
 			obs(AttemptInfo{Attempt: attempt, Method: req.Method, URL: req.URL.String(), Wait: delay})
 		}
-		time.Sleep(delay)
+		if err := waitContext(req.Context(), delay); err != nil {
+			return nil, err
+		}
 	}
 	return nil, errors.New("exhausted retries")
+}
+
+func waitContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

@@ -1,8 +1,10 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -44,10 +46,20 @@ type Post struct {
 var subredditMentionRegex = regexp.MustCompile(`(?i)/r/([a-zA-Z0-9_]+)`)
 
 func CrawlSubreddit(subreddit string) (*SubredditInfo, []Post, error) {
+	return crawlSubreddit(context.Background(), subreddit, func(_ context.Context, url string) (*http.Response, error) {
+		return authenticatedGet(url)
+	})
+}
+
+func CrawlSubredditContext(ctx context.Context, subreddit string) (*SubredditInfo, []Post, error) {
+	return crawlSubreddit(ctx, subreddit, authenticatedGetWithContext)
+}
+
+func crawlSubreddit(ctx context.Context, subreddit string, get func(context.Context, string) (*http.Response, error)) (*SubredditInfo, []Post, error) {
 	subreddit = strings.ToLower(strings.TrimSpace(subreddit))
 
 	aboutURL := fmt.Sprintf("https://oauth.reddit.com/r/%s/about", subreddit)
-	resp, err := authenticatedGet(aboutURL)
+	resp, err := get(ctx, aboutURL)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch subreddit %s: %v", subreddit, err)
 		return nil, nil, err
@@ -62,7 +74,7 @@ func CrawlSubreddit(subreddit string) (*SubredditInfo, []Post, error) {
 	var aboutWrapper struct {
 		Data SubredditInfo `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&aboutWrapper); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&aboutWrapper); err != nil {
 		log.Printf("⚠️ Failed to decode subreddit %s response: %v", subreddit, err)
 		return nil, nil, err
 	}
@@ -94,7 +106,7 @@ func CrawlSubreddit(subreddit string) (*SubredditInfo, []Post, error) {
 			postsURL += "&after=" + after
 		}
 
-		resp, err = authenticatedGet(postsURL)
+		resp, err = get(ctx, postsURL)
 		if err != nil {
 			log.Printf("⚠️ Failed to fetch posts for subreddit %s: %v", subreddit, err)
 			return &aboutWrapper.Data, allPosts, err
@@ -113,7 +125,8 @@ func CrawlSubreddit(subreddit string) (*SubredditInfo, []Post, error) {
 				After string `json:"after"`
 			} `json:"data"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&postsWrapper); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&postsWrapper); err != nil {
+			resp.Body.Close()
 			log.Printf("⚠️ Failed to decode posts for subreddit %s: %v", subreddit, err)
 			return &aboutWrapper.Data, allPosts, err
 		}
@@ -135,7 +148,13 @@ func CrawlSubreddit(subreddit string) (*SubredditInfo, []Post, error) {
 		}
 		after = postsWrapper.Data.After
 
-		time.Sleep(1 * time.Second)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return &aboutWrapper.Data, allPosts, ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	log.Printf("📥 Fetched %d posts from r/%s", len(allPosts), subreddit)

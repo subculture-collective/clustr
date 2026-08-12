@@ -34,23 +34,24 @@ export default function ShareButton({ getState }: Props) {
   };
 
   return (
-    <div className={`absolute z-20
+    <div className={`fixed z-40
       ${isMobile 
-        ? 'top-2 right-2' /* Mobile: top-right to avoid search bar */
-        : 'top-2 left-[340px]' /* Desktop: after sidebar (w-80 = 320px + padding) */
+        ? 'right-3 top-36'
+        : 'left-[22rem] top-24'
       }`}>
       <button
         onClick={handleShare}
-        className={`px-3 py-2 rounded border text-sm font-medium transition-colors shadow ${
+        className={`instrument-panel instrument-button rounded px-3 py-2 text-xs ${
           copied
-            ? "bg-green-600 border-green-400 text-white"
-            : "bg-blue-600 border-blue-400 text-white hover:bg-blue-700"
+            ? "text-[#78d6b0]"
+            : "text-white"
         }`}
         aria-label={copied ? "Link copied to clipboard" : "Share current view - Copy link to clipboard"}
+        title="Copy shareable link to clipboard"
         aria-live="polite"
       >
-        <span aria-hidden="true">{copied ? "✓ " : "📋 "}</span>
-        {copied ? "Copied!" : "Share Link"}
+        <span aria-hidden="true">{copied ? "✓ " : "↗ "}</span>
+        {copied ? "Copied" : "Share Link"}
       </button>
     </div>
   );

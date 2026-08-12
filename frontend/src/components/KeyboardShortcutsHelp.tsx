@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { SHORTCUTS, type KeyboardShortcut } from '../hooks/useKeyboardShortcuts';
 
 interface KeyboardShortcutsHelpProps {
@@ -35,6 +36,26 @@ function formatShortcut(shortcut: KeyboardShortcut): string {
 }
 
 export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelpProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])'));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => { document.removeEventListener('keydown', handleKeyDown); priorFocus?.focus(); };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   // Group shortcuts by category
@@ -56,24 +77,26 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="shortcuts-title"
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden"
+        ref={dialogRef}
+        className="instrument-panel max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 id="shortcuts-title" className="text-2xl font-bold text-gray-900 dark:text-white">
+        <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+          <h2 id="shortcuts-title" className="text-xl font-semibold text-white">
             Keyboard Shortcuts
           </h2>
           <button
+            ref={closeRef}
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            className="instrument-button rounded-full px-3 text-[#9aaba8]"
             aria-label="Close shortcuts help"
           >
             <svg
@@ -100,19 +123,19 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
 
             return (
               <div key={category} className="mb-6 last:mb-0">
-                <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                <h3 className="instrument-label mb-3">
                   {category}
                 </h3>
                 <div className="space-y-2">
                   {shortcuts.map((shortcut, index) => (
                     <div
                       key={`${shortcut.key}-${index}`}
-                      className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      className="flex items-center justify-between rounded-md px-3 py-2 hover:bg-white/5"
                     >
-                      <span className="text-gray-700 dark:text-gray-300">
+                      <span className="text-[#c7d2cf]">
                         {shortcut.description}
                       </span>
-                      <kbd className="inline-flex items-center gap-1 px-2 py-1 text-sm font-mono font-semibold text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded shadow-sm">
+                      <kbd className="inline-flex items-center gap-1 rounded border border-white/15 bg-white/5 px-2 py-1 font-mono text-xs font-semibold text-white">
                         {formatShortcut(shortcut)}
                       </kbd>
                     </div>
@@ -124,10 +147,10 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-            Press <kbd className="px-1.5 py-0.5 text-xs font-mono bg-gray-200 dark:bg-gray-700 rounded">Esc</kbd> or{' '}
-            <kbd className="px-1.5 py-0.5 text-xs font-mono bg-gray-200 dark:bg-gray-700 rounded">?</kbd> to close
+        <div className="border-t border-white/10 bg-white/[.02] px-6 py-3">
+          <p className="text-center text-sm text-[#9aaba8]">
+            Press <kbd className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">Esc</kbd> or{' '}
+            <kbd className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">?</kbd> to close
           </p>
         </div>
       </div>

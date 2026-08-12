@@ -164,7 +164,7 @@ func (m *mockVersionStore) GetPrecalculatedGraphDataCappedAll(ctx context.Contex
 func TestCalculateAndStoreDiffs_FirstVersion(t *testing.T) {
 	ctx := context.Background()
 	store := newMockVersionStore()
-	
+
 	// Create a version
 	version, err := store.CreateGraphVersion(ctx, db.CreateGraphVersionParams{
 		NodeCount: 2,
@@ -174,7 +174,7 @@ func TestCalculateAndStoreDiffs_FirstVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create version: %v", err)
 	}
-	
+
 	// Create a new snapshot (oldSnapshot is nil for first version)
 	newSnapshot := &GraphSnapshot{
 		Nodes: map[string]GraphNode{
@@ -185,17 +185,17 @@ func TestCalculateAndStoreDiffs_FirstVersion(t *testing.T) {
 			"user_1->sub_1": {Source: "user_1", Target: "sub_1"},
 		},
 	}
-	
+
 	err = CalculateAndStoreDiffs(ctx, store, version.ID, nil, newSnapshot)
 	if err != nil {
 		t.Fatalf("CalculateAndStoreDiffs failed: %v", err)
 	}
-	
+
 	// Verify all diffs are "add" operations
 	if len(store.diffs) != 3 {
 		t.Errorf("Expected 3 diffs, got %d", len(store.diffs))
 	}
-	
+
 	for _, diff := range store.diffs {
 		if diff.Action != "add" {
 			t.Errorf("Expected action 'add', got '%s'", diff.Action)
@@ -210,13 +210,13 @@ func TestCalculateAndStoreDiffs_FirstVersion(t *testing.T) {
 func TestCalculateAndStoreDiffs_NodeUpdates(t *testing.T) {
 	ctx := context.Background()
 	store := newMockVersionStore()
-	
+
 	version, _ := store.CreateGraphVersion(ctx, db.CreateGraphVersionParams{
 		NodeCount: 2,
 		LinkCount: 1,
 		Status:    "completed",
 	})
-	
+
 	oldSnapshot := &GraphSnapshot{
 		Nodes: map[string]GraphNode{
 			"user_1": {ID: "user_1", Name: "alice", Val: "10", Type: "user"},
@@ -226,7 +226,7 @@ func TestCalculateAndStoreDiffs_NodeUpdates(t *testing.T) {
 			"user_1->sub_1": {Source: "user_1", Target: "sub_1"},
 		},
 	}
-	
+
 	newSnapshot := &GraphSnapshot{
 		Nodes: map[string]GraphNode{
 			"user_1": {ID: "user_1", Name: "alice", Val: "15", Type: "user"}, // Val changed
@@ -236,12 +236,12 @@ func TestCalculateAndStoreDiffs_NodeUpdates(t *testing.T) {
 			"user_1->sub_1": {Source: "user_1", Target: "sub_1"},
 		},
 	}
-	
+
 	err := CalculateAndStoreDiffs(ctx, store, version.ID, oldSnapshot, newSnapshot)
 	if err != nil {
 		t.Fatalf("CalculateAndStoreDiffs failed: %v", err)
 	}
-	
+
 	// Should have 1 update for the changed node
 	updateCount := 0
 	for _, diff := range store.diffs {
@@ -252,7 +252,7 @@ func TestCalculateAndStoreDiffs_NodeUpdates(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if updateCount != 1 {
 		t.Errorf("Expected 1 node update, got %d", updateCount)
 	}
@@ -262,13 +262,13 @@ func TestCalculateAndStoreDiffs_NodeUpdates(t *testing.T) {
 func TestCalculateAndStoreDiffs_AdditionsAndRemovals(t *testing.T) {
 	ctx := context.Background()
 	store := newMockVersionStore()
-	
+
 	version, _ := store.CreateGraphVersion(ctx, db.CreateGraphVersionParams{
 		NodeCount: 3,
 		LinkCount: 2,
 		Status:    "completed",
 	})
-	
+
 	oldSnapshot := &GraphSnapshot{
 		Nodes: map[string]GraphNode{
 			"user_1": {ID: "user_1", Name: "alice", Val: "10", Type: "user"},
@@ -278,7 +278,7 @@ func TestCalculateAndStoreDiffs_AdditionsAndRemovals(t *testing.T) {
 			"user_1->sub_1": {Source: "user_1", Target: "sub_1"},
 		},
 	}
-	
+
 	newSnapshot := &GraphSnapshot{
 		Nodes: map[string]GraphNode{
 			"user_1": {ID: "user_1", Name: "alice", Val: "10", Type: "user"},
@@ -289,12 +289,12 @@ func TestCalculateAndStoreDiffs_AdditionsAndRemovals(t *testing.T) {
 			"user_3->sub_1": {Source: "user_3", Target: "sub_1"}, // Added
 		},
 	}
-	
+
 	err := CalculateAndStoreDiffs(ctx, store, version.ID, oldSnapshot, newSnapshot)
 	if err != nil {
 		t.Fatalf("CalculateAndStoreDiffs failed: %v", err)
 	}
-	
+
 	// Count additions and removals
 	nodeAdds, nodeRemoves, linkAdds := 0, 0, 0
 	for _, diff := range store.diffs {
@@ -308,7 +308,7 @@ func TestCalculateAndStoreDiffs_AdditionsAndRemovals(t *testing.T) {
 			linkAdds++
 		}
 	}
-	
+
 	if nodeAdds != 1 {
 		t.Errorf("Expected 1 node addition, got %d", nodeAdds)
 	}
@@ -324,12 +324,12 @@ func TestCalculateAndStoreDiffs_AdditionsAndRemovals(t *testing.T) {
 func TestCleanupOldVersions(t *testing.T) {
 	ctx := context.Background()
 	store := newMockVersionStore()
-	
+
 	// Set count function to simulate 15 versions
 	store.countFunc = func(ctx context.Context) (int64, error) {
 		return 15, nil
 	}
-	
+
 	// Cleanup should succeed (we're mocking the actual deletion)
 	err := CleanupOldVersions(ctx, store)
 	if err != nil {

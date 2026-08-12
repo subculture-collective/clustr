@@ -17,6 +17,8 @@ import { useMobileDetect } from '../hooks/useMobileDetect';
 interface MinimapProps {
     /** Current camera position in 3D space */
     cameraPosition?: { x: number; y: number; z: number };
+    /** Point the camera is looking toward, used for heading and frustum. */
+    cameraTarget?: { x: number; y: number; z: number };
     /** Community detection result for cluster visualization */
     communityResult?: CommunityResult | null;
     /** All graph nodes with positions */
@@ -35,6 +37,7 @@ const COMMUNITY_DOT_SIZE = 3;
 
 export default function Minimap({
     cameraPosition,
+    cameraTarget,
     communityResult,
     nodes = [],
     onCameraMove,
@@ -49,6 +52,7 @@ export default function Minimap({
         nodes: Array<{ id: string; x?: number; y?: number; z?: number }>;
     }>({ nodes: [] });
     const { isMobile } = useMobileDetect();
+    const displaySize = isMobile ? Math.min(size, 144) : size;
 
     // Toggle visibility with M key
     useEffect(() => {
@@ -206,27 +210,27 @@ export default function Minimap({
         if (cameraPosition) {
             const { x: camX, y: camY } = worldToMinimap(cameraPosition.x, cameraPosition.y, bounds);
             
-            // Draw viewport as a semi-transparent rectangle/trapezoid
-            // For simplicity, we'll draw a circle indicating camera position
-            // and a small rectangle around it indicating the viewport frustum
-            const viewportSize = 20; // Size of viewport indicator in minimap pixels
+            const target = cameraTarget ?? { x: 0, y: 0, z: 0 };
+            const heading = Math.atan2(target.y - cameraPosition.y, target.x - cameraPosition.x);
+            const length = 24;
+            const halfWidth = 9;
+            const tipX = camX + Math.cos(heading) * length;
+            const tipY = camY + Math.sin(heading) * length;
+            const leftX = camX + Math.cos(heading + Math.PI / 2) * halfWidth;
+            const leftY = camY + Math.sin(heading + Math.PI / 2) * halfWidth;
+            const rightX = camX + Math.cos(heading - Math.PI / 2) * halfWidth;
+            const rightY = camY + Math.sin(heading - Math.PI / 2) * halfWidth;
 
+            ctx.beginPath();
+            ctx.moveTo(leftX, leftY);
+            ctx.lineTo(tipX, tipY);
+            ctx.lineTo(rightX, rightY);
+            ctx.closePath();
+            ctx.fillStyle = VIEWPORT_INDICATOR_COLOR;
+            ctx.fill();
             ctx.strokeStyle = VIEWPORT_INDICATOR_STROKE;
             ctx.lineWidth = 2;
-            ctx.strokeRect(
-                camX - viewportSize / 2,
-                camY - viewportSize / 2,
-                viewportSize,
-                viewportSize
-            );
-
-            ctx.fillStyle = VIEWPORT_INDICATOR_COLOR;
-            ctx.fillRect(
-                camX - viewportSize / 2,
-                camY - viewportSize / 2,
-                viewportSize,
-                viewportSize
-            );
+            ctx.stroke();
 
             // Draw camera position dot
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
@@ -239,7 +243,7 @@ export default function Minimap({
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
         ctx.strokeRect(0, 0, size, size);
-    }, [size, cameraPosition, communityResult, nodes, calculateBounds, worldToMinimap]);
+    }, [size, cameraPosition, cameraTarget, communityResult, nodes, calculateBounds, worldToMinimap]);
 
     // Throttled render at 5Hz
     useEffect(() => {
@@ -342,36 +346,52 @@ export default function Minimap({
         setIsDragging(false);
     }, []);
 
+    const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLCanvasElement>) => {
+        if (!onCameraMove || !cameraPosition) return;
+        const bounds = calculateBounds();
+        const stepX = Math.max((bounds.maxX - bounds.minX) * 0.05, 1);
+        const stepY = Math.max((bounds.maxY - bounds.minY) * 0.05, 1);
+        const next = { ...cameraPosition };
+        if (event.key === 'ArrowLeft') next.x -= stepX;
+        else if (event.key === 'ArrowRight') next.x += stepX;
+        else if (event.key === 'ArrowUp') next.y -= stepY;
+        else if (event.key === 'ArrowDown') next.y += stepY;
+        else return;
+        event.preventDefault();
+        onCameraMove(next);
+    }, [onCameraMove, cameraPosition, calculateBounds]);
+
     if (!isVisible) {
         return null;
     }
 
     return (
         <div
-            className={`fixed z-20
+            className={`instrument-panel fixed z-20 overflow-hidden rounded-2xl p-1
                 ${isMobile 
-                    ? 'bottom-20 right-2' /* Mobile: above bottom sheet */
-                    : 'bottom-2 right-2' /* Desktop: bottom-right */
+                    ? 'bottom-24 right-3'
+                    : 'bottom-5 right-5'
                 }`}
             style={{
-                width: size,
-                height: size,
+                width: displaySize,
+                height: displaySize,
             }}
         >
             <canvas
                 ref={canvasRef}
                 width={size}
                 height={size}
-                className="cursor-pointer rounded shadow-lg"
+                className="h-full w-full cursor-pointer rounded-xl"
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseLeave}
-                aria-label="Graph minimap - shows overview and current viewport"
+                onKeyDown={handleKeyDown}
+                tabIndex={0}
+                role="button"
+                aria-label="Graph minimap - universe navigator. Use arrow keys to move the camera."
             />
-            <div className="absolute -top-6 right-0 text-xs text-white/70 bg-black/50 px-2 py-1 rounded">
-                Press M to toggle
-            </div>
+            <span className="instrument-label pointer-events-none absolute left-3 top-3">NAV / M</span>
         </div>
     );
 }

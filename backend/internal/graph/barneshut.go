@@ -2,6 +2,11 @@ package graph
 
 import "math"
 
+const (
+	barnesHutMaxDepth = 32
+	barnesHutMinCell  = 1e-9
+)
+
 // barnesHutNode represents a quadtree node for Barnes-Hut simulation.
 // This implements spatial decomposition for O(n log n) force calculation.
 type barnesHutNode struct {
@@ -14,6 +19,7 @@ type barnesHutNode struct {
 
 	// Quadtree structure
 	body           int            // Index of particle (if leaf)
+	bodies         []int          // coincident particles retained in a bounded leaf bucket
 	isLeaf         bool           // True if this node contains at most one particle
 	nw, ne, sw, se *barnesHutNode // Quadrants
 }
@@ -32,12 +38,28 @@ func newBarnesHutNode(x, y, width, height float64) *barnesHutNode {
 
 // insert adds a particle at index i with position (px, py) and mass m to the tree.
 func (node *barnesHutNode) insert(i int, px, py, m float64) {
+	node.insertAtDepth(i, px, py, m, 0)
+}
+
+func (node *barnesHutNode) insertAtDepth(i int, px, py, m float64, depth int) {
 	// If node is empty, place particle here
 	if node.body == -1 && node.isLeaf {
 		node.body = i
+		node.bodies = []int{i}
 		node.centerX = px
 		node.centerY = py
 		node.mass = m
+		return
+	}
+
+	// Coincident and numerically inseparable particles stay in a bounded leaf
+	// bucket. This prevents unbounded recursive subdivision before force jitter.
+	if node.isLeaf && (depth >= barnesHutMaxDepth || node.width <= barnesHutMinCell || node.height <= barnesHutMinCell || (math.Abs(node.centerX-px) <= barnesHutMinCell && math.Abs(node.centerY-py) <= barnesHutMinCell)) {
+		totalMass := node.mass + m
+		node.centerX = (node.centerX*node.mass + px*m) / totalMass
+		node.centerY = (node.centerY*node.mass + py*m) / totalMass
+		node.mass = totalMass
+		node.bodies = append(node.bodies, i)
 		return
 	}
 
@@ -49,6 +71,7 @@ func (node *barnesHutNode) insert(i int, px, py, m float64) {
 		oldY := node.centerY
 		oldMass := node.mass
 		node.body = -1 // No longer stores a single particle
+		node.bodies = nil
 
 		// Create quadrants
 		halfW := node.width / 2
@@ -59,7 +82,7 @@ func (node *barnesHutNode) insert(i int, px, py, m float64) {
 		node.se = newBarnesHutNode(node.x+halfW, node.y+halfH, halfW, halfH)
 
 		// Re-insert old particle into appropriate quadrant
-		node.insertIntoQuadrant(oldBody, oldX, oldY, oldMass)
+		node.insertIntoQuadrant(oldBody, oldX, oldY, oldMass, depth+1)
 	}
 
 	// Update center of mass for this node
@@ -69,11 +92,11 @@ func (node *barnesHutNode) insert(i int, px, py, m float64) {
 	node.mass = totalMass
 
 	// Insert new particle into appropriate quadrant
-	node.insertIntoQuadrant(i, px, py, m)
+	node.insertIntoQuadrant(i, px, py, m, depth+1)
 }
 
 // insertIntoQuadrant inserts a particle into the appropriate child quadrant.
-func (node *barnesHutNode) insertIntoQuadrant(i int, px, py, m float64) {
+func (node *barnesHutNode) insertIntoQuadrant(i int, px, py, m float64, depth int) {
 	halfW := node.width / 2
 	halfH := node.height / 2
 	midX := node.x + halfW
@@ -81,15 +104,15 @@ func (node *barnesHutNode) insertIntoQuadrant(i int, px, py, m float64) {
 
 	if px < midX {
 		if py < midY {
-			node.nw.insert(i, px, py, m)
+			node.nw.insertAtDepth(i, px, py, m, depth)
 		} else {
-			node.sw.insert(i, px, py, m)
+			node.sw.insertAtDepth(i, px, py, m, depth)
 		}
 	} else {
 		if py < midY {
-			node.ne.insert(i, px, py, m)
+			node.ne.insertAtDepth(i, px, py, m, depth)
 		} else {
-			node.se.insert(i, px, py, m)
+			node.se.insertAtDepth(i, px, py, m, depth)
 		}
 	}
 }
@@ -108,8 +131,17 @@ func (node *barnesHutNode) calculateForce(i int, px, py, theta, repStrength floa
 	dist := math.Sqrt(dx*dx + dy*dy)
 
 	// If this is a leaf with the particle itself, skip
-	if node.isLeaf && node.body == i {
-		return 0, 0
+	effectiveMass := node.mass
+	if node.isLeaf {
+		for _, candidate := range node.bodies {
+			if candidate == i {
+				effectiveMass--
+				break
+			}
+		}
+		if effectiveMass <= 0 {
+			return 0, 0
+		}
 	}
 
 	// Check if we can use center-of-mass approximation
@@ -118,11 +150,12 @@ func (node *barnesHutNode) calculateForce(i int, px, py, theta, repStrength floa
 		if dist < 1e-6 {
 			// Particles too close, add small jitter to prevent collapse
 			dist = 1e-6
-			dx = (randFloat() - 0.5) * 2e-6
-			dy = (randFloat() - 0.5) * 2e-6
+			angle := float64((i*2654435761)%360) * math.Pi / 180
+			dx = math.Cos(angle) * 1e-6
+			dy = math.Sin(angle) * 1e-6
 		}
 		// FR-style repulsion: components scale as repStrength * mass / dist^2
-		force := repStrength * node.mass / (dist * dist)
+		force := repStrength * effectiveMass / (dist * dist)
 		fx := -dx / dist * force // Repulsive force pushes away
 		fy := -dy / dist * force
 		return fx, fy

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 // BatchUpsertGraphNodes performs a multi-row upsert for graph_nodes for the provided slice.
@@ -106,7 +108,7 @@ func (q *Queries) BatchUpdateGraphNodePositions(ctx context.Context, ids []strin
 	if epsilon > 0 {
 		// Query existing positions for comparison
 		query := "SELECT id, pos_x, pos_y, pos_z FROM graph_nodes WHERE id = ANY($1)"
-		rows, err := q.db.QueryContext(ctx, query, ids)
+		rows, err := q.db.QueryContext(ctx, query, pq.Array(ids))
 		if err != nil {
 			return 0, fmt.Errorf("failed to query existing positions: %w", err)
 		}

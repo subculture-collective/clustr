@@ -22,8 +22,8 @@ const GraphErrorFallback = ({
   const is3DMode = mode === '3d';
 
   return (
-    <div className="w-full h-screen bg-black flex items-center justify-center">
-      <div className="bg-red-900/20 border border-red-500/50 rounded-lg px-8 py-6 max-w-2xl mx-4">
+    <div className="flex h-screen w-full items-center justify-center bg-[#030506]">
+      <div className="instrument-panel mx-4 max-w-2xl rounded-2xl border-red-500/30 px-8 py-6">
         <div className="flex items-start gap-4">
           {/* Error icon */}
           <div className="flex-shrink-0">
@@ -85,7 +85,7 @@ const GraphErrorFallback = ({
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={onRetry}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
+                className="instrument-button rounded-full border-red-400/30 px-4 font-medium text-red-100"
               >
                 Try Again
               </button>
@@ -93,7 +93,7 @@ const GraphErrorFallback = ({
               {is3DMode && onFallbackTo2D && (
                 <button
                   onClick={onFallbackTo2D}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors"
+                  className="instrument-button rounded-full border-white/15 px-4 font-medium text-white"
                 >
                   Switch to 2D View
                 </button>
@@ -101,7 +101,7 @@ const GraphErrorFallback = ({
               
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-medium transition-colors"
+                className="instrument-button rounded-full border-white/15 px-4 font-medium text-white"
               >
                 Reload Page
               </button>

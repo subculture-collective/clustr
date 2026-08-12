@@ -44,8 +44,23 @@ type Config struct {
 	CORSAllowedOrigins   []string // allowed CORS origins
 	EnableRateLimit      bool     // enable rate limiting middleware
 	// Crawler rate limiting (Reddit API)
-	CrawlerRPS       float64 // requests per second to Reddit API
-	CrawlerBurstSize int     // burst size for crawler rate limit
+	CrawlerRPS                 float64 // requests per second to Reddit API
+	CrawlerBurstSize           int     // burst size for crawler rate limit
+	CrawlLeaseDuration         time.Duration
+	CrawlHeartbeatInterval     time.Duration
+	CrawlMaxAttempts           int
+	CrawlFreshness             time.Duration
+	BacklogActivationLimit     int
+	BacklogActivationWindow    time.Duration
+	DiscoveryAuthorBudget      int
+	DiscoveryCandidateBudget   int
+	DiscoveryDailyBudget       int
+	DiscoveryReconsiderHorizon time.Duration
+	PublicationInterval        time.Duration
+	PublicationMaxAge          time.Duration
+	RevisionReadsEnabled       bool
+	CrawlerLifecycleEnabled    bool
+	RendererManifestVersion    string
 	// Layout computation settings
 	LayoutMaxNodes   int     // maximum nodes to include in layout computation
 	LayoutIterations int     // number of force-directed iterations
@@ -110,8 +125,25 @@ func Load() *Config {
 		RateLimitPerIPBurst:  utils.GetEnvAsInt("RATE_LIMIT_PER_IP_BURST", 20),
 		EnableRateLimit:      utils.GetEnvAsBool("ENABLE_RATE_LIMIT", true),
 		// Crawler rate limiting: default to ~1.66 rps (60 requests per minute)
-		CrawlerRPS:       utils.GetEnvAsFloat("CRAWLER_RPS", 1.66),
-		CrawlerBurstSize: utils.GetEnvAsInt("CRAWLER_BURST_SIZE", 1),
+		CrawlerRPS:             utils.GetEnvAsFloat("CRAWLER_RPS", 1.66),
+		CrawlerBurstSize:       utils.GetEnvAsInt("CRAWLER_BURST_SIZE", 1),
+		CrawlLeaseDuration:     durationEnv("CRAWL_LEASE_DURATION", 2*time.Minute),
+		CrawlHeartbeatInterval: durationEnv("CRAWL_HEARTBEAT_INTERVAL", 30*time.Second),
+		CrawlMaxAttempts:       utils.GetEnvAsInt("CRAWL_MAX_ATTEMPTS", 3),
+		CrawlFreshness:         durationEnv("CRAWL_FRESHNESS", 7*24*time.Hour),
+		// Imported backlog is intentionally throttled even when the lifecycle is
+		// enabled. Explicit manual/API work uses the active cohort instead.
+		BacklogActivationLimit:     utils.GetEnvAsInt("CRAWL_BACKLOG_ACTIVATION_LIMIT", 24),
+		BacklogActivationWindow:    durationEnv("CRAWL_BACKLOG_ACTIVATION_WINDOW", time.Hour),
+		DiscoveryAuthorBudget:      utils.GetEnvAsInt("DISCOVERY_AUTHOR_BUDGET", 25),
+		DiscoveryCandidateBudget:   utils.GetEnvAsInt("DISCOVERY_CANDIDATE_BUDGET", 50),
+		DiscoveryDailyBudget:       utils.GetEnvAsInt("DISCOVERY_DAILY_BUDGET", 500),
+		DiscoveryReconsiderHorizon: durationEnv("DISCOVERY_RECONSIDER_HORIZON", 30*24*time.Hour),
+		PublicationInterval:        durationEnv("PUBLICATION_INTERVAL", time.Hour),
+		PublicationMaxAge:          durationEnv("PUBLICATION_MAX_AGE", 2*time.Hour),
+		RevisionReadsEnabled:       utils.GetEnvAsBool("REVISION_READS_ENABLED", true),
+		CrawlerLifecycleEnabled:    utils.GetEnvAsBool("CRAWLER_LIFECYCLE_ENABLED", true),
+		RendererManifestVersion:    strings.TrimSpace(os.Getenv("RENDERER_MANIFEST_VERSION")),
 		// Layout computation: sensible defaults for force-directed layout
 		LayoutMaxNodes:   utils.GetEnvAsInt("LAYOUT_MAX_NODES", 5000),
 		LayoutIterations: utils.GetEnvAsInt("LAYOUT_ITERATIONS", 400),
@@ -150,6 +182,18 @@ func Load() *Config {
 			cached.SentryEnvironment = "development"
 		}
 	}
+	if cached.RendererManifestVersion == "" {
+		cached.RendererManifestVersion = "spatial-scene-v1"
+	}
+	if cached.CrawlMaxAttempts < 1 {
+		cached.CrawlMaxAttempts = 3
+	}
+	if cached.BacklogActivationLimit < 1 {
+		cached.BacklogActivationLimit = 24
+	}
+	if cached.CrawlHeartbeatInterval >= cached.CrawlLeaseDuration {
+		cached.CrawlHeartbeatInterval = cached.CrawlLeaseDuration / 4
+	}
 
 	// Parse CORS allowed origins
 	corsOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
@@ -164,6 +208,18 @@ func Load() *Config {
 	}
 
 	return cached
+}
+
+func durationEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 // ResetForTest clears cached config; for use in tests only.

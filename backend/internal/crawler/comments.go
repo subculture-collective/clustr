@@ -1,8 +1,10 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -21,19 +23,26 @@ type Comment struct {
 }
 
 func CrawlComments(postID string) ([]Comment, error) {
+	return CrawlCommentsContext(context.Background(), postID)
+}
+
+func CrawlCommentsContext(ctx context.Context, postID string) ([]Comment, error) {
 	limit := utils.GetEnvAsInt("MAX_COMMENTS_PER_POST", 100)
 	maxDepth := utils.GetEnvAsInt("MAX_COMMENT_DEPTH", 4)
 	url := fmt.Sprintf("https://oauth.reddit.com/comments/%s?limit=%d", postID, limit)
 
-	resp, err := authenticatedGet(url)
+	resp, err := authenticatedGetWithContext(ctx, url)
 	if err != nil {
 		log.Printf("⚠️ Failed to fetch comments for post %s: %v", postID, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("comments request failed: %s", resp.Status)
+	}
 
 	var data []interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&data); err != nil {
 		log.Printf("⚠️ Failed to decode comments for post %s: %v", postID, err)
 		return nil, err
 	}
@@ -42,8 +51,18 @@ func CrawlComments(postID string) ([]Comment, error) {
 		return nil, fmt.Errorf("unexpected comments response")
 	}
 
-	commentData := data[1].(map[string]interface{})["data"].(map[string]interface{})
-	children := commentData["children"].([]interface{})
+	listing, ok := data[1].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected comments listing")
+	}
+	commentData, ok := listing["data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected comments listing data")
+	}
+	children, ok := commentData["children"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected comments children")
+	}
 
 	comments := parseCommentsWithLimit(children, 0, maxDepth)
 	log.Printf("🧮 Total parsed comments for post %s: %d", postID, len(comments))

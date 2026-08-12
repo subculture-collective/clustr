@@ -177,9 +177,10 @@ export default function Communities({
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold">Community Detection</h1>
+            <p className="instrument-label mb-3">Places / Calculated structure</p>
+            <h1 className="text-3xl font-bold">Community landmarks</h1>
             <p className="text-gray-400 mt-2">
-              Louvain algorithm - Modularity:{" "}
+              Weighted partition · modularity:{" "}
               {communityResult.modularity.toFixed(4)}
             </p>
           </div>

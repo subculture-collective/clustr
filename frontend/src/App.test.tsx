@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import App from './App';
 
@@ -32,7 +32,12 @@ vi.mock('./components/Communities', () => ({
 }));
 
 vi.mock('./components/Sidebar', () => ({
-  default: ({ graphMode, onGraphModeChange, onShowDashboard, onShowAdmin }: any) => (
+  default: ({ graphMode, onGraphModeChange, onShowDashboard, onShowAdmin }: {
+    graphMode: string;
+    onGraphModeChange: (mode: string) => void;
+    onShowDashboard: () => void;
+    onShowAdmin: () => void;
+  }) => (
     <div>
       <div>Mocked Sidebar</div>
       <div>Mode: {graphMode}</div>
@@ -60,7 +65,7 @@ vi.mock('./components/Legend', () => ({
 }));
 
 vi.mock('./components/ShareButton', () => ({
-  default: ({ getState }: { getState: () => any }) => (
+  default: ({ getState }: { getState: () => unknown }) => (
     <button onClick={() => getState()}>Mocked ShareButton</button>
   ),
 }));
@@ -83,8 +88,8 @@ vi.mock('./utils/urlState', () => ({
 }));
 
 describe('App', () => {
-  let setItemSpy: any;
-  let getItemSpy: any;
+  let setItemSpy: ReturnType<typeof vi.fn>;
+  let getItemSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -115,8 +120,8 @@ describe('App', () => {
   it('renders default 3D view', () => {
     render(<App />);
     expect(screen.getByText('Mocked Graph3D')).toBeInTheDocument();
-    expect(screen.getByText('Mocked Sidebar')).toBeInTheDocument();
-    expect(screen.getByText('Mocked Legend')).toBeInTheDocument();
+    expect(screen.queryByText('Mocked Sidebar')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Analyst' })).toBeInTheDocument();
   });
 
   it('persists view mode to localStorage', () => {
@@ -147,9 +152,15 @@ describe('App', () => {
 
   it('switches to 2D view', () => {
     render(<App />);
-    
-    // Verify mode indicator shows 3d initially
-    expect(screen.getByText('Mode: 3d')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+    expect(screen.getByText('Mocked Graph2D')).toBeInTheDocument();
+  });
+
+  it('reveals dense controls only in analyst mode', () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyst' }));
+    expect(screen.getByText('Mocked Sidebar')).toBeInTheDocument();
+    expect(screen.getByText('Mocked Legend')).toBeInTheDocument();
   });
 
   it('switches to dashboard view', () => {

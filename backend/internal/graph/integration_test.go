@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 )
@@ -294,7 +294,7 @@ func TestIntegration_LayoutComputation_ConfigRespect(t *testing.T) {
 
 	// Verify that positions were set for at least some nodes
 	var posCount int
-	err = conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM graph_nodes WHERE id = ANY($1) AND pos_x IS NOT NULL", testNodeIDs).Scan(&posCount)
+	err = conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM graph_nodes WHERE id = ANY($1) AND pos_x IS NOT NULL", pq.Array(testNodeIDs)).Scan(&posCount)
 	if err != nil {
 		t.Fatalf("failed to count positioned nodes: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestIntegration_IncrementalPrecalculation(t *testing.T) {
 
 	// Wait a moment to ensure timestamp difference
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Second run: incremental precalculation (should detect NO changes)
 	t.Log("Running second incremental precalculation (no changes)...")
 	if err := svc.PrecalculateGraphDataWithMode(ctx, false); err != nil {
@@ -578,20 +578,20 @@ func TestIntegration_IncrementalPrecalculation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get precalc state: %v", err)
 	}
-	
+
 	counts, err := q.CountChangedEntities(ctx, sql.NullTime{Time: firstPrecalcTime, Valid: true})
 	if err != nil {
 		t.Fatalf("failed to count changed entities: %v", err)
 	}
 	t.Logf("Changed entities since first run: subs=%d, users=%d, posts=%d, comments=%d",
 		counts.ChangedSubreddits, counts.ChangedUsers, counts.ChangedPosts, counts.ChangedComments)
-	
+
 	// Assert no changes detected (incremental mode should have been used)
 	totalChanges := counts.ChangedSubreddits + counts.ChangedUsers + counts.ChangedPosts + counts.ChangedComments
-	if totalChanges > 2 {  // Allow small margin for timing issues
+	if totalChanges > 2 { // Allow small margin for timing issues
 		t.Errorf("expected minimal changes, got %d total changes", totalChanges)
 	}
-	
+
 	// Node count should remain the same
 	var nodeCount2 int64
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM graph_nodes").Scan(&nodeCount2); err != nil {
@@ -620,7 +620,7 @@ func TestIntegration_IncrementalPrecalculation(t *testing.T) {
 		t.Errorf("expected last_full_precalc_at to be more recent than previous last_precalc_at")
 	}
 	t.Logf("Last full precalc at: %v", state3.LastFullPrecalcAt.Time)
-	
+
 	// Node count should still be the same (same data)
 	var nodeCount3 int64
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM graph_nodes").Scan(&nodeCount3); err != nil {

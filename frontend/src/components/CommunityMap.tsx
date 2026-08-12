@@ -450,44 +450,44 @@ export default function CommunityMap({
       sim.stop();
       tooltip.remove();
     };
-  }, [aggregated, onFocusNode]);
+  }, [aggregated, comm, onFocusNode]);
 
   return (
-    <div ref={containerRef} className="w-full h-screen relative bg-white dark:bg-black">
-      <div className="absolute top-2 left-2 z-10 bg-black/50 dark:bg-black/50 text-white rounded px-3 py-2 text-sm flex items-center gap-3">
+    <div ref={containerRef} className="relative h-screen w-full bg-[#030506]">
+      <div className="instrument-panel absolute left-3 top-36 z-10 flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-white">
         <button
-          className="border border-white/30 rounded px-2 py-1 hover:bg-white/10"
+          className="instrument-button rounded-full px-3 text-xs"
           onClick={load}
         >
           Reload
         </button>
         <button
-          className="border border-white/30 rounded px-2 py-1 hover:bg-white/10"
+          className="instrument-button rounded-full px-3 text-xs"
           onClick={() => setExpanded(null)}
         >
           Collapse all
         </button>
-        <span className="opacity-80">
+        <span className="text-[#9aaba8]">
           {expanded === null
             ? "Community map"
             : `Expanded: Community ${expanded}`}
         </span>
       </div>
-      <div className="absolute top-2 right-2 z-10 bg-black/50 dark:bg-black/50 text-white rounded px-3 py-2 text-sm flex items-center gap-3">
+      <div className="instrument-panel absolute right-3 top-36 z-10 flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-white">
         <button
-          className="px-2 py-1 rounded border bg-blue-600 border-blue-400 hover:bg-blue-700"
+          className="instrument-button rounded-full px-3 text-xs text-white"
           onClick={onBack}
         >
           Back
         </button>
       </div>
       {loading && (
-        <div className="absolute top-2 left-2 z-20 bg-black/50 dark:bg-black/50 text-white rounded px-3 py-2 text-sm">
+        <div className="instrument-panel absolute left-3 top-36 z-20 rounded-xl px-3 py-2 text-sm text-white">
           Loading…
         </div>
       )}
       {error && (
-        <div className="absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded px-3 py-2 text-sm">
+        <div className="instrument-panel absolute left-3 top-36 z-20 rounded-xl border-red-400/30 px-3 py-2 text-sm text-red-100">
           Error: {error}
         </div>
       )}

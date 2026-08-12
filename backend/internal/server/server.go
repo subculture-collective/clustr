@@ -8,9 +8,11 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/graph"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
 )
 
 type Server struct {
@@ -36,6 +38,10 @@ func InitDB() (*db.Queries, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := conn.PingContext(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := migrations.VerifyCurrent(ctx, conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -122,7 +128,7 @@ func (s *Server) Start(ctx context.Context) error {
 					Subscribers: sql.NullInt32{Int32: 0, Valid: true},
 				})
 				if err == nil {
-					_ = s.DB.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{SubredditID: id})
+					_ = crawler.EnsureJob(ctx, s.DB, id, "startup")
 				}
 			}
 		}

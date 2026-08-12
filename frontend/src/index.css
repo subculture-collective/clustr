@@ -4,117 +4,144 @@
 
 @layer base {
   :root {
-    /* Light theme colors */
-    --graph-bg: #f8f9fa;
-    --graph-bg-rgb: 248, 249, 250;
-    --node-subreddit: #059669;
-    --node-user: #2563eb;
-    --node-post: #d97706;
-    --node-comment: #dc2626;
-    --node-default: #7c3aed;
-    
-    /* Focus indicator colors */
-    --focus-ring-color: #3b82f6;
-    --focus-ring-width: 3px;
+    color-scheme: dark;
+    --void: #030506;
+    --void-soft: #080b0d;
+    --surface: rgba(8, 12, 14, 0.92);
+    --surface-solid: #0a0e10;
+    --surface-raised: #101619;
+    --line: rgba(215, 235, 232, 0.14);
+    --line-strong: rgba(215, 235, 232, 0.28);
+    --ink: #eef7f4;
+    --ink-muted: #9aaba8;
+    --ink-faint: #61706e;
+    --signal: #b6ff62;
+    --signal-rgb: 182, 255, 98;
+    --cyan: #68dcff;
+    --amber: #ffc75f;
+    --rose: #ff7096;
+    --graph-bg: #030506;
+    --graph-bg-rgb: 3, 5, 6;
+    --node-subreddit: #b6ff62;
+    --node-user: #68dcff;
+    --node-post: #ffc75f;
+    --node-comment: #ff7096;
+    --node-default: #d8e7e3;
+    --focus-ring-color: #b6ff62;
+    --focus-ring-width: 2px;
+    --font-display: 'Avenir Next', 'Segoe UI', sans-serif;
+    --font-instrument: 'IBM Plex Mono', 'Cascadia Mono', 'SFMono-Regular', monospace;
+    --ease-orbit: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  .dark {
-    /* Dark theme colors */
-    --graph-bg: #000000;
-    --graph-bg-rgb: 0, 0, 0;
-    --node-subreddit: #4ade80;
-    --node-user: #60a5fa;
-    --node-post: #f59e0b;
-    --node-comment: #f43f5e;
-    --node-default: #a78bfa;
-    
-    /* Focus indicator colors - brighter for dark mode */
-    --focus-ring-color: #60a5fa;
+  * { box-sizing: border-box; }
+  html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+  body {
+    overflow: hidden;
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
   }
-  
-  /* High contrast mode */
-  .high-contrast {
-    --graph-bg: #000000;
-    --graph-bg-rgb: 0, 0, 0;
-    --node-subreddit: #00ff00;
-    --node-user: #00ffff;
-    --node-post: #ffff00;
-    --node-comment: #ff00ff;
-    --node-default: #ffffff;
-    --focus-ring-color: #ffff00;
-    --focus-ring-width: 4px;
-  }
-  
-  /* Accessible focus indicators for all interactive elements */
-  button:focus-visible,
-  a:focus-visible,
-  input:focus-visible,
-  select:focus-visible,
-  textarea:focus-visible,
-  [role="button"]:focus-visible,
-  [role="link"]:focus-visible,
-  [role="option"]:focus-visible,
-  [tabindex]:not([tabindex="-1"]):focus-visible {
+  button, input, select, textarea { font: inherit; }
+  ::selection { background: rgba(var(--signal-rgb), .28); color: var(--ink); }
+
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+  textarea:focus-visible, [role="button"]:focus-visible, [tabindex]:not([tabindex="-1"]):focus-visible {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);
-    outline-offset: 2px;
+    outline-offset: 3px;
   }
-  
-  /* Remove default focus outline for mouse users, keep for keyboard */
-  *:focus:not(:focus-visible) {
-    outline: none;
-  }
+  *:focus:not(:focus-visible) { outline: none; }
 }
 
 @layer components {
-  /* Skip to main content link - hidden until focused */
-  .skip-link {
-    position: absolute;
-    top: -100px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 9999;
-    padding: 0.75rem 1.5rem;
-    background: #3b82f6;
-    color: white;
-    text-decoration: none;
-    border-radius: 0.375rem;
-    font-weight: 600;
-    transition: top 0.2s;
-  }
-  
-  .skip-link:focus {
-    top: 1rem;
-  }
-  
-  /* High contrast mode utility classes */
-  .high-contrast button,
-  .high-contrast a {
-    border: 2px solid currentColor;
-  }
-  
-  .high-contrast .bg-gray-100,
-  .high-contrast .bg-gray-700,
-  .high-contrast .bg-gray-800 {
-    background-color: #000000 !important;
-    border: 2px solid #ffffff !important;
-  }
-  
-  /* Screen reader only text */
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
+  .observatory-shell {
+    position: relative;
+    width: 100%;
+    height: 100dvh;
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 58% 42%, rgba(104, 220, 255, .055), transparent 28%),
+      radial-gradient(circle at 28% 68%, rgba(182, 255, 98, .04), transparent 24%),
+      var(--void);
   }
-  
-  /* Make sure focus is always visible in high contrast */
-  .high-contrast *:focus-visible {
-    outline: 4px solid #ffff00 !important;
-    outline-offset: 2px;
+  .observatory-shell::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: .15;
+    background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(circle at center, black, transparent 78%);
   }
+  .instrument-panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .42), inset 0 1px rgba(255,255,255,.035);
+    backdrop-filter: blur(18px) saturate(120%);
+  }
+  .instrument-label {
+    font-family: var(--font-instrument);
+    font-size: .625rem;
+    line-height: 1;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .instrument-button {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    border: 1px solid transparent;
+    color: var(--ink-muted);
+    transition: color 160ms, background-color 160ms, border-color 160ms, transform 160ms;
+  }
+  .instrument-button:hover { color: var(--ink); background: rgba(255,255,255,.055); border-color: var(--line); }
+  .instrument-button:active { transform: translateY(1px); }
+  .instrument-button[data-active="true"] { color: var(--void); background: var(--signal); border-color: var(--signal); }
+  .telemetry-line { font-family: var(--font-instrument); letter-spacing: .08em; color: var(--ink-muted); }
+  .signal-dot { width: .4rem; height: .4rem; border-radius: 999px; background: var(--signal); box-shadow: 0 0 18px rgba(var(--signal-rgb), .8); }
+
+  .skip-link {
+    position: fixed; top: -100px; left: 50%; z-index: 9999; transform: translateX(-50%);
+    padding: .75rem 1.25rem; background: var(--signal); color: var(--void); font-weight: 700;
+  }
+  .skip-link:focus { top: 1rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  .high-contrast { --surface: #000; --line: #fff; --ink: #fff; --ink-muted: #fff; --signal: #ffff00; --focus-ring-color: #ffff00; }
+
+  .content-view {
+    height: 100dvh;
+    overflow: auto;
+    background: var(--void);
+    padding: 5rem 0 6rem;
+  }
+  .content-view > * { min-height: calc(100dvh - 11rem); height: auto !important; background: transparent !important; }
+  .content-view h1, .content-view h2, .content-view h3 { letter-spacing: -.025em; }
+  .content-view table { border-color: var(--line); }
+  .content-view .bg-gray-800, .content-view .bg-gray-750, .content-view .bg-gray-700 {
+    background: var(--surface-raised) !important;
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px rgba(255,255,255,.025);
+  }
+  .content-view .text-gray-400 { color: var(--ink-muted) !important; }
+  .content-view .bg-blue-600, .content-view .bg-purple-600 {
+    background: var(--signal) !important;
+    color: var(--void) !important;
+    border: 1px solid var(--signal);
+  }
+}
+
+@media (max-width: 767px) {
+  .observatory-shell::after { background-size: 32px 32px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

@@ -48,7 +48,7 @@ describe('Sidebar', () => {
   it('renders sidebar in expanded state by default', () => {
     render(<Sidebar {...defaultProps} />);
     
-    expect(screen.getByText('Controls')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'World controls' })).toBeInTheDocument();
   });
 
   it('renders view mode buttons', () => {
@@ -208,12 +208,12 @@ describe('Sidebar', () => {
     
     render(<Sidebar {...defaultProps} />);
     
-    const collapseButton = screen.getByLabelText('Collapse sidebar');
+    const collapseButton = screen.getByRole('button', { name: /collapse sidebar/i });
     await user.click(collapseButton);
     
-    // Check that Controls heading is no longer visible
     await waitFor(() => {
-      expect(screen.queryByText('Controls')).not.toBeInTheDocument();
+      expect(collapseButton).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeInTheDocument();
     });
   });
 
@@ -225,12 +225,12 @@ describe('Sidebar', () => {
     
     render(<Sidebar {...defaultProps} />);
     
-    const expandButton = screen.getByLabelText('Expand sidebar');
+    const expandButton = screen.getByRole('button', { name: /expand sidebar/i });
     await user.click(expandButton);
     
-    // Check that Controls heading is visible
     await waitFor(() => {
-      expect(screen.getByText('Controls')).toBeInTheDocument();
+      expect(expandButton).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('heading', { name: 'World controls' })).toBeInTheDocument();
     });
   });
 
@@ -239,7 +239,7 @@ describe('Sidebar', () => {
     
     render(<Sidebar {...defaultProps} />);
     
-    const collapseButton = screen.getByLabelText('Collapse sidebar');
+    const collapseButton = screen.getByRole('button', { name: /collapse sidebar/i });
     await user.click(collapseButton);
     
     await waitFor(() => {
@@ -268,20 +268,21 @@ describe('Sidebar', () => {
     render(<Sidebar {...defaultProps} />);
     
     // Sidebar should be expanded initially
-    expect(screen.getByText('Controls')).toBeInTheDocument();
+    const sidebarToggle = screen.getByRole('button', { name: /collapse sidebar/i });
+    expect(sidebarToggle).toHaveAttribute('aria-expanded', 'true');
     
     // Press Ctrl+B to collapse
     await user.keyboard('{Control>}b{/Control}');
     
     await waitFor(() => {
-      expect(screen.queryByText('Controls')).not.toBeInTheDocument();
+      expect(sidebarToggle).toHaveAttribute('aria-expanded', 'false');
     });
     
     // Press Ctrl+B again to expand
     await user.keyboard('{Control>}b{/Control}');
     
     await waitFor(() => {
-      expect(screen.getByText('Controls')).toBeInTheDocument();
+      expect(sidebarToggle).toHaveAttribute('aria-expanded', 'true');
     });
   });
 
@@ -298,6 +299,6 @@ describe('Sidebar', () => {
     await user.keyboard('{Control>}b{/Control}');
     
     // Sidebar should still be expanded (Ctrl+B was ignored)
-    expect(screen.getByText('Controls')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /collapse sidebar/i })).toHaveAttribute('aria-expanded', 'true');
   });
 });

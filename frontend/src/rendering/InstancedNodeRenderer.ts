@@ -66,11 +66,12 @@ interface TypedMesh {
 }
 
 const DEFAULT_COLORS: Record<string, THREE.Color> = {
-  subreddit: new THREE.Color('#4ade80'),
-  user: new THREE.Color('#60a5fa'),
-  post: new THREE.Color('#f59e0b'),
-  comment: new THREE.Color('#f43f5e'),
-  default: new THREE.Color('#a78bfa'),
+  community: new THREE.Color('#b6ff62'),
+  subreddit: new THREE.Color('#78d6b0'),
+  user: new THREE.Color('#69a7d8'),
+  post: new THREE.Color('#e6bd72'),
+  comment: new THREE.Color('#d47e96'),
+  default: new THREE.Color('#d8e7e3'),
 };
 
 export class InstancedNodeRenderer {
@@ -414,22 +415,21 @@ export class InstancedNodeRenderer {
   public queryFrustum(camera: THREE.Camera): string[] {
     // Ensure camera matrices are up to date
     camera.updateMatrixWorld();
-    camera.updateProjectionMatrix();
-    
-    // Reuse frustum and matrix instances to avoid allocations
-    if (!this._frustum) {
-      this._frustum = new THREE.Frustum();
-      this._projectionMatrix = new THREE.Matrix4();
+    if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) {
+      camera.updateProjectionMatrix();
     }
     
-    this._projectionMatrix.multiplyMatrices(
+    // Reuse frustum and matrix instances to avoid allocations
+    const projectionMatrix = this._projectionMatrix ?? (this._projectionMatrix = new THREE.Matrix4());
+    const frustum = this._frustum ?? (this._frustum = new THREE.Frustum());
+    projectionMatrix.multiplyMatrices(
       camera.projectionMatrix,
       camera.matrixWorldInverse
     );
-    this._frustum.setFromProjectionMatrix(this._projectionMatrix);
+    frustum.setFromProjectionMatrix(projectionMatrix);
 
     // Query octree for nodes in frustum
-    const visibleItems = this.octree.queryFrustum(this._frustum);
+    const visibleItems = this.octree.queryFrustum(frustum);
     
     return visibleItems.map(item => item.id);
   }
@@ -462,6 +462,11 @@ export class InstancedNodeRenderer {
     this.camera = camera;
   }
 
+  /** Update the global node scale before repopulating instance matrices. */
+  public setNodeRelSize(nodeRelSize: number): void {
+    this.nodeRelSize = nodeRelSize;
+  }
+
   /**
    * Update size attenuation setting
    */
@@ -482,77 +487,14 @@ export class InstancedNodeRenderer {
    * Create material for a node type with optional distance-based scaling
    */
   private createMaterial(type: string): THREE.Material {
-    if (!this.sizeAttenuation) {
-      // Use standard material without distance scaling
-      return new THREE.MeshLambertMaterial({
-        color: DEFAULT_COLORS[type] || DEFAULT_COLORS.default,
-      });
-    }
-
-    // Create custom shader material with distance-based scaling
-    const baseColor = DEFAULT_COLORS[type] || DEFAULT_COLORS.default;
-    
-    return new THREE.ShaderMaterial({
-      uniforms: {
-        baseColor: { value: baseColor },
-        cameraPosition: { value: new THREE.Vector3() },
-        attenuationFactor: { value: 0.3 }, // Controls how much size changes with distance
-        minScale: { value: 0.3 }, // Minimum scale factor (prevent nodes from becoming too small)
-        maxScale: { value: 2.0 }, // Maximum scale factor (prevent nodes from becoming too large)
-      },
-      vertexShader: `
-        uniform vec3 cameraPosition;
-        uniform float attenuationFactor;
-        uniform float minScale;
-        uniform float maxScale;
-        
-        attribute vec3 instanceColor;
-        varying vec3 vColor;
-        varying vec3 vNormal;
-        
-        void main() {
-          vColor = instanceColor;
-          vNormal = normalize(normalMatrix * normal);
-          
-          // Compute instance center in world space (local origin transformed by instance matrix)
-          vec4 instanceCenter = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-          
-          // Calculate distance from camera using instance center so scale is uniform per instance
-          float dist = length(cameraPosition - instanceCenter.xyz);
-          
-          // Apply logarithmic attenuation for smooth scaling
-          // log(1 + x) provides smooth falloff, scaled by attenuationFactor
-          float scaleFactor = 1.0 + attenuationFactor * log(1.0 + dist / 100.0);
-          scaleFactor = clamp(scaleFactor, minScale, maxScale);
-          
-          // Apply uniform scale to the instance's local vertex position, then transform to world space
-          vec3 scaledPosition = position * scaleFactor;
-          vec4 worldPosition = instanceMatrix * vec4(scaledPosition, 1.0);
-          
-          gl_Position = projectionMatrix * viewMatrix * worldPosition;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 baseColor;
-        varying vec3 vColor;
-        varying vec3 vNormal;
-        
-        void main() {
-          // Simple Lambertian shading
-          vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-          float diff = max(dot(vNormal, lightDir), 0.0);
-          
-          // Mix instance color with base color
-          vec3 color = mix(baseColor, vColor, step(0.01, length(vColor)));
-          
-          // Apply lighting
-          vec3 ambient = color * 0.6;
-          vec3 diffuse = color * 0.4 * diff;
-          
-          gl_FragColor = vec4(ambient + diffuse, 1.0);
-        }
-      `,
-      lights: false, // We handle lighting in the shader
+    // Three's built-in material handles InstancedMesh transforms and instance
+    // colors across WebGL implementations. The former custom shader redeclared
+    // Three-provided uniforms/attributes and silently failed compilation,
+    // leaving the primary canvas blank while the minimap still rendered.
+    return new THREE.MeshBasicMaterial({
+      color: DEFAULT_COLORS[type] || DEFAULT_COLORS.default,
+      vertexColors: false,
+      toneMapped: false,
     });
   }
 
@@ -560,17 +502,8 @@ export class InstancedNodeRenderer {
    * Update camera position in shader uniforms (call this each frame)
    */
   public updateCameraPosition(): void {
-    if (!this.camera || !this.sizeAttenuation) return;
-    
-    // Reuse the cached vector to avoid per-frame allocation
+    if (!this.camera) return;
     this.camera.getWorldPosition(this.cameraPosVector);
-    
-    for (const [, typedMesh] of this.meshes.entries()) {
-      const material = typedMesh.mesh.material;
-      if (material instanceof THREE.ShaderMaterial && material.uniforms.cameraPosition) {
-        material.uniforms.cameraPosition.value.copy(this.cameraPosVector);
-      }
-    }
   }
 
   /**

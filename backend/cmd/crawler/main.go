@@ -15,6 +15,7 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/scheduler"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
 )
@@ -88,6 +89,10 @@ func main() {
 		if err := conn.PingContext(ctx); err != nil {
 			logger.Error("Failed to ping database", "error", err)
 			log.Fatalf("Failed to ping database: %v", err)
+		}
+		if err := migrations.VerifyCurrent(ctx, conn); err != nil {
+			logger.Error("Database schema is incompatible", "error", err)
+			log.Fatal(err)
 		}
 		logger.Info("Database connection established")
 	}

@@ -205,16 +205,16 @@ export default function Sidebar(props: Props) {
     <>
       {/* Sidebar - Desktop: left sidebar, Mobile: bottom sheet */}
       <aside
-        className={`fixed bg-black/90 backdrop-blur-sm text-white z-30 transition-all duration-200 flex flex-col shadow-2xl
+        className={`instrument-panel fixed z-30 flex flex-col overflow-hidden text-white transition-all duration-200
           ${isMobile 
             ? /* Mobile: bottom sheet */
               isCollapsed
-                ? 'bottom-0 left-0 right-0 h-14'
-                : 'bottom-0 left-0 right-0 h-[70vh] max-h-[600px]'
+                ? 'bottom-20 left-3 right-3 h-14 rounded-2xl'
+                : 'bottom-20 left-3 right-3 h-[70vh] max-h-[600px] rounded-2xl'
             : /* Desktop: left sidebar */
               isCollapsed
-                ? 'top-0 left-0 h-full w-14'
-                : 'top-0 left-0 h-full w-80'
+                ? 'left-5 top-24 h-[calc(100vh-8.5rem)] w-14 rounded-2xl'
+                : 'left-5 top-24 h-[calc(100vh-8.5rem)] w-80 rounded-2xl'
           }`}
         role="complementary"
         aria-label="Graph controls sidebar"
@@ -225,7 +225,7 @@ export default function Sidebar(props: Props) {
           className={`flex items-center justify-between px-4 py-3 border-b border-white/10
           ${isMobile && !isCollapsed ? 'border-t' : ''}`}>
           {!isCollapsed && (
-            <h2 className="text-sm font-semibold" id="sidebar-title">Controls</h2>
+            <div><p className="instrument-label">Analyst console</p><h2 className="mt-1 text-sm font-semibold" id="sidebar-title">World controls</h2></div>
           )}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}

@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ type fakeStore struct {
 	// inputs tracked
 	insertedNodes map[string]db.BulkInsertGraphNodeParams
 	insertedLinks [][2]string
+	clearGraphErr error
+	stateUpdates  []db.UpdatePrecalcStateParams
 }
 
 func newFakeStore() *fakeStore {
@@ -25,7 +28,7 @@ func newFakeStore() *fakeStore {
 // Cleanup
 func (f *fakeStore) ClearSubredditRelationships(ctx context.Context) error { return nil }
 func (f *fakeStore) ClearUserSubredditActivity(ctx context.Context) error  { return nil }
-func (f *fakeStore) ClearGraphTables(ctx context.Context) error            { return nil }
+func (f *fakeStore) ClearGraphTables(ctx context.Context) error            { return f.clearGraphErr }
 
 // Reads
 func (f *fakeStore) GetAllSubreddits(ctx context.Context) ([]db.GetAllSubredditsRow, error) {
@@ -100,6 +103,7 @@ func (f *fakeStore) GetPrecalcState(ctx context.Context) (db.PrecalcState, error
 }
 
 func (f *fakeStore) UpdatePrecalcState(ctx context.Context, arg db.UpdatePrecalcStateParams) error {
+	f.stateUpdates = append(f.stateUpdates, arg)
 	return nil
 }
 
@@ -240,12 +244,12 @@ func TestPrecalculateGraphDataWithMode_IncrementalFirstRun(t *testing.T) {
 
 	fs := newFakeStore()
 	svc := NewService(fs)
-	
+
 	// First run should be full rebuild since no last_precalc_at
 	if err := svc.PrecalculateGraphDataWithMode(context.Background(), false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Verify nodes were inserted
 	if _, ok := fs.insertedNodes["user_10"]; !ok {
 		t.Fatalf("expected user node to be inserted")
@@ -264,14 +268,28 @@ func TestPrecalculateGraphDataWithMode_ForceFullRebuild(t *testing.T) {
 
 	fs := newFakeStore()
 	svc := NewService(fs)
-	
+
 	// Force full rebuild
 	if err := svc.PrecalculateGraphDataWithMode(context.Background(), true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Verify nodes were inserted
 	if _, ok := fs.insertedNodes["user_10"]; !ok {
 		t.Fatalf("expected user node to be inserted")
+	}
+}
+
+func TestPrecalculateGraphDataFailureDoesNotAdvanceWatermark(t *testing.T) {
+	config.ResetForTest()
+	fs := newFakeStore()
+	fs.clearGraphErr = errors.New("injected clear failure")
+	svc := NewService(fs)
+
+	if err := svc.PrecalculateGraphDataWithMode(context.Background(), true); err == nil {
+		t.Fatal("expected injected calculation failure")
+	}
+	if len(fs.stateUpdates) != 0 {
+		t.Fatalf("failed calculation wrote %d precalc state updates", len(fs.stateUpdates))
 	}
 }

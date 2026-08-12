@@ -6,16 +6,16 @@ import SearchBar from './SearchBar';
 describe('SearchBar', () => {
   const mockOnSelectNode = vi.fn();
   let fetchMock: ReturnType<typeof vi.fn>;
+  const setupUser = () => userEvent.setup({ delay: null });
+  const waitForDebounce = () => new Promise((resolve) => setTimeout(resolve, 175));
 
   beforeEach(() => {
-    vi.useFakeTimers();
     fetchMock = vi.fn();
     global.fetch = fetchMock;
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
   });
 
   it('renders search input with placeholder', () => {
@@ -26,7 +26,7 @@ describe('SearchBar', () => {
   });
 
   it('shows clear button when query is entered', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     render(<SearchBar onSelectNode={mockOnSelectNode} />);
     
     const input = screen.getByPlaceholderText(/Search nodes/i);
@@ -37,7 +37,7 @@ describe('SearchBar', () => {
   });
 
   it('performs search after debounce delay', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -59,7 +59,7 @@ describe('SearchBar', () => {
     await user.type(input, 'ask');
 
     // Fast-forward past debounce delay
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -70,7 +70,7 @@ describe('SearchBar', () => {
   });
 
   it('displays search results in dropdown', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -98,7 +98,7 @@ describe('SearchBar', () => {
     await user.type(input, 'test');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for results
     await waitFor(() => {
@@ -108,7 +108,7 @@ describe('SearchBar', () => {
   });
 
   it('calls onSelectNode when result is clicked', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -130,7 +130,7 @@ describe('SearchBar', () => {
     await user.type(input, 'ask');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for result
     await waitFor(() => {
@@ -145,7 +145,7 @@ describe('SearchBar', () => {
   });
 
   it('allows keyboard navigation with arrow keys', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -173,7 +173,7 @@ describe('SearchBar', () => {
     await user.type(input, 'test');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for results
     await waitFor(() => {
@@ -190,7 +190,7 @@ describe('SearchBar', () => {
   });
 
   it('closes dropdown on Escape key', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -212,7 +212,7 @@ describe('SearchBar', () => {
     await user.type(input, 'ask');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for results
     await waitFor(() => {
@@ -229,7 +229,7 @@ describe('SearchBar', () => {
   });
 
   it('shows "no results" message when search returns empty', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -244,7 +244,7 @@ describe('SearchBar', () => {
     await user.type(input, 'nonexistent');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for no results message
     await waitFor(() => {
@@ -253,7 +253,7 @@ describe('SearchBar', () => {
   });
 
   it('shows loading indicator while searching', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = setupUser();
     
     // Create a promise that we can control
     let resolveSearch: ((value: Response) => void) | undefined;
@@ -269,7 +269,7 @@ describe('SearchBar', () => {
     await user.type(input, 'test');
 
     // Fast-forward past debounce
-    await vi.advanceTimersByTimeAsync(150);
+    await waitForDebounce();
 
     // Wait for loading state
     await waitFor(() => {

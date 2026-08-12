@@ -39,6 +39,7 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         // Ensure consistent rendering for visual tests
         launchOptions: {
+          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
           args: [
             '--disable-web-security',
             '--disable-gpu-vsync',

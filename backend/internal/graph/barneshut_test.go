@@ -170,6 +170,26 @@ func TestBuildBarnesHutTreeEmpty(t *testing.T) {
 	}
 }
 
+func TestBarnesHutCoincidentPointsUseBoundedBucket(t *testing.T) {
+	const count = 1000
+	x := make([]float64, count)
+	y := make([]float64, count)
+	tree := buildBarnesHutTree(x, y)
+	if tree == nil || tree.mass != count {
+		t.Fatalf("coincident tree mass=%v", tree)
+	}
+	if !tree.isLeaf || len(tree.bodies) != count {
+		t.Fatalf("coincident particles were not retained in one bounded bucket: leaf=%v bodies=%d", tree.isLeaf, len(tree.bodies))
+	}
+	dx, dy := make([]float64, count), make([]float64, count)
+	calculateBarnesHutForces(x, y, dx, dy, 0.8, 1)
+	for i := range dx {
+		if math.IsNaN(dx[i]) || math.IsInf(dx[i], 0) || math.IsNaN(dy[i]) || math.IsInf(dy[i], 0) {
+			t.Fatalf("non-finite coincident force at %d", i)
+		}
+	}
+}
+
 func TestCalculateBarnesHutForces(t *testing.T) {
 	// Two particles on horizontal line
 	X := []float64{40, 60}

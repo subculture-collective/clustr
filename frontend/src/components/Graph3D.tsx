@@ -49,7 +49,9 @@ type SubSizeMode =
 
 // Minimal FG instance surface we use
 type FGApi = {
-  camera?: () => { position?: { x: number; y: number; z: number } } | undefined;
+  camera?: () => THREE.Camera | undefined;
+  scene?: () => THREE.Scene | undefined;
+  graphData?: () => { nodes?: GraphNode[] } | undefined;
   cameraPosition?: (
     pos: { x: number; y: number; z: number },
     lookAt?: { x: number; y: number; z: number },
@@ -289,13 +291,18 @@ interface Props {
 }
 
 export default function Graph3D(props: Props) {
-  // Check if instanced rendering is enabled via environment variable
+  // Instancing is the primary exploration Adapter. Set this explicit rollback
+  // flag only when diagnosing a browser-specific regression.
   const useInstancedRenderer = useMemo(() => {
-    const env = import.meta.env?.VITE_USE_INSTANCED_RENDERER as unknown as string | boolean | undefined;
+    const env = import.meta.env?.VITE_USE_LEGACY_RENDERER as unknown as string | boolean | undefined;
+    const previousFlag = import.meta.env?.VITE_USE_INSTANCED_RENDERER as unknown as string | boolean | undefined;
+    // Honour an explicitly false previous flag during the migration; new
+    // deployments use the rollback flag above and otherwise choose instancing.
+    if (previousFlag === false || previousFlag === 'false' || previousFlag === '0') return false;
     if (typeof env === 'string') {
-      return env.toLowerCase() === 'true' || env === '1';
+      return !(env.toLowerCase() === 'true' || env === '1');
     }
-    return Boolean(env);
+    return !env;
   }, []);
 
   // Use the new instanced renderer if enabled
@@ -311,6 +318,8 @@ export default function Graph3D(props: Props) {
     onLODTierChange: _onLODTierChange, 
     ...propsWithoutLOD 
   } = props;
+  void _enableAdaptiveLOD;
+  void _onLODTierChange;
   return <Graph3DOriginal {...propsWithoutLOD} />;
 }
 
@@ -914,9 +923,10 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
 
   // Effect to manage bundle meshes in the THREE.js scene
   useEffect(() => {
-    if (!fgRef.current || !useBundling || !communityResult) {
+    const forceGraph = fgRef.current as unknown as FGApi | undefined;
+    if (!forceGraph || !useBundling || !communityResult) {
       // Clean up existing bundle meshes
-      const scene = (fgRef.current as any)?.scene?.();
+      const scene = forceGraph?.scene?.();
       if (scene) {
         for (const mesh of bundleMeshesRef.current) {
           scene.remove(mesh);
@@ -935,24 +945,27 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
     }
 
     // Reusable Maps to avoid allocating new instances on each update
-    const nodeRefs = new Map<string, any>();
+    const nodeRefs = new Map<string, GraphNode & Required<Pick<GraphNode, "x" | "y" | "z">>>();
     const vector3Positions = new Map<string, THREE.Vector3>();
 
     // Function to update bundles based on current node positions
     const updateBundles = () => {
-      const scene = (fgRef.current as any)?.scene?.();
+      const scene = forceGraph.scene?.();
       if (!scene) return;
 
       // Extract current node positions from the force graph
       // Store node references directly to avoid intermediate object allocation
       nodeRefs.clear();
-      const graphData = (fgRef.current as any)?.graphData?.();
+      const graphData = forceGraph.graphData?.();
       
       if (graphData?.nodes) {
         for (const node of graphData.nodes) {
           const id = String(node.id);
           if (typeof node.x === 'number' && typeof node.y === 'number' && typeof node.z === 'number') {
-            nodeRefs.set(id, node);
+            nodeRefs.set(
+              id,
+              node as GraphNode & Required<Pick<GraphNode, "x" | "y" | "z">>
+            );
           }
         }
       }
@@ -1022,7 +1035,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
     return () => {
       clearInterval(intervalId);
       // Clean up bundle meshes
-      const scene = (fgRef.current as any)?.scene?.();
+      const scene = forceGraph.scene?.();
       if (scene) {
         for (const mesh of bundleMeshesRef.current) {
           scene.remove(mesh);
@@ -1045,7 +1058,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
       return;
     }
 
-    const scene = (fgRef.current as any)?.scene?.();
+    const scene = (fgRef.current as unknown as FGApi | undefined)?.scene?.();
     if (!scene) return;
 
     // Initialize label renderer if needed
@@ -1057,7 +1070,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
     }
 
     // Build label data once when dependencies change
-    const graphData = (fgRef.current as any)?.graphData?.();
+    const graphData = (fgRef.current as unknown as FGApi | undefined)?.graphData?.();
     if (!graphData?.nodes) {
       return;
     }
@@ -1091,7 +1104,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
     const animate = () => {
       if (!labelRendererRef.current || !fgRef.current) return;
 
-      const camera = (fgRef.current as any)?.camera?.();
+      const camera = (fgRef.current as unknown as FGApi | undefined)?.camera?.();
       if (camera) {
         const cameraDistance = Math.sqrt(
           camera.position.x ** 2 +

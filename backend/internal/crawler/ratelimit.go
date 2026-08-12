@@ -29,10 +29,18 @@ func getLimiter() *rate.Limiter {
 }
 
 // waitForRateLimit blocks until a token is available from the rate limiter
-func waitForRateLimit() {
-	// Use background context for rate limiting
-	_ = getLimiter().Wait(context.Background())
+func waitForRateLimitContext(ctx context.Context) error {
+	if err := getLimiter().Wait(ctx); err != nil {
+		return err
+	}
 	metrics.CrawlerRateLimitWaits.Inc()
+	return nil
+}
+
+// waitForRateLimit remains for older callers. New collection paths must pass
+// their crawl context so shutdown can interrupt pacing.
+func waitForRateLimit() {
+	_ = waitForRateLimitContext(context.Background())
 }
 
 // ResetLimiterForTest resets the rate limiter singleton for testing

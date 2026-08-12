@@ -173,7 +173,9 @@ func TestGzip(t *testing.T) {
 				t.Errorf("expected Vary header to contain 'Accept-Encoding', got %q", varyHeader)
 			}
 
-			contentEncoding := rr.Header().Get("Content-Encoding")
+			// Result snapshots the headers actually written on the wire. Reading
+			// rr.Header directly would miss mutations made after WriteHeader.
+			contentEncoding := rr.Result().Header.Get("Content-Encoding")
 			if tt.expectCompressed {
 				if contentEncoding != tt.expectEncoding {
 					t.Errorf("expected Content-Encoding: %s, got %s", tt.expectEncoding, contentEncoding)

@@ -70,6 +70,15 @@ func NewRouter(q *db.Queries) *mux.Router {
 
 	// Lightweight healthcheck: GET /health -> {"status":"ok"}
 	r.HandleFunc("/health", handlers.Health).Methods("GET")
+	// Public ingress preserves the /api prefix. Keep explicit aliases so
+	// readiness does not depend on proxy-specific path rewriting.
+	r.HandleFunc("/api/health", handlers.Health).Methods("GET")
+	if q != nil {
+		readiness := handlers.Readiness(q.DB())
+		r.Handle("/ready", readiness).Methods("GET")
+		r.Handle("/api/ready", readiness).Methods("GET")
+	}
+	r.HandleFunc("/api/config/effective", handlers.EffectiveConfig).Methods("GET")
 
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler()).Methods("GET")
@@ -107,10 +116,24 @@ func NewRouter(q *db.Queries) *mux.Router {
 	// Graph data for the frontend: GET /api/graph
 	graphHandler := handlers.NewHandler(q, graphCache)
 	r.Handle("/api/graph", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphData)))).Methods("GET")
+	// Immutable explorer publication routes. revision_id is optional and defaults to
+	// the current published snapshot; all data in a response is revision-scoped.
+	if q != nil && cfg.RevisionReadsEnabled { // permits isolated router-security tests that intentionally use no database.
+		revisionHandler := handlers.NewRevisionHandler(q.DB())
+		r.Handle("/api/graph/manifest", middleware.Gzip(http.HandlerFunc(revisionHandler.Manifest))).Methods("GET")
+		r.Handle("/api/graph/overview", middleware.Gzip(http.HandlerFunc(revisionHandler.Overview))).Methods("GET")
+		r.Handle("/api/graph/region", middleware.Gzip(http.HandlerFunc(revisionHandler.Region))).Methods("GET")
+		r.Handle("/api/graph/community/{stable_id}", middleware.Gzip(http.HandlerFunc(revisionHandler.Community))).Methods("GET")
+		r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(revisionHandler.Diff))).Methods("GET")
+	}
 
-	// Tiered graph endpoints for overview and drill-down
-	r.Handle("/api/graph/overview", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphOverview)))).Methods("GET")
-	r.Handle("/api/graph/region", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphRegion)))).Methods("GET")
+	// Compatibility names for the previous mutable tiered graph during rollback.
+	r.Handle("/api/graph/legacy-overview", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphOverview)))).Methods("GET")
+	r.Handle("/api/graph/legacy-region", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphRegion)))).Methods("GET")
+	if !cfg.RevisionReadsEnabled {
+		r.Handle("/api/graph/overview", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphOverview)))).Methods("GET")
+		r.Handle("/api/graph/region", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetGraphRegion)))).Methods("GET")
+	}
 
 	// Edge bundles endpoint with gzip and ETag: GET /api/graph/bundles
 	r.Handle("/api/graph/bundles", middleware.Gzip(middleware.ETag(http.HandlerFunc(graphHandler.GetEdgeBundles)))).Methods("GET")
@@ -118,7 +141,10 @@ func NewRouter(q *db.Queries) *mux.Router {
 	// Graph versioning endpoints
 	versionHandler := handlers.NewVersionHandler(q, graphCache)
 	r.Handle("/api/graph/version", middleware.Gzip(http.HandlerFunc(versionHandler.GetCurrentVersion))).Methods("GET")
-	r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(versionHandler.GetDiffSince))).Methods("GET")
+	r.Handle("/api/graph/legacy-diff", middleware.Gzip(http.HandlerFunc(versionHandler.GetDiffSince))).Methods("GET")
+	if !cfg.RevisionReadsEnabled {
+		r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(versionHandler.GetDiffSince))).Methods("GET")
+	}
 
 	// Search endpoint with gzip and ETag: GET /api/search?node=...
 	searchHandler := middleware.Gzip(middleware.ETag(http.HandlerFunc(handlers.SearchNode(q))))
@@ -136,9 +162,9 @@ func NewRouter(q *db.Queries) *mux.Router {
 	communityHandler := handlers.NewCommunityHandler(q, graphCache)
 	r.Handle("/api/communities", middleware.Gzip(middleware.ETag(http.HandlerFunc(communityHandler.GetCommunities)))).Methods("GET")
 	r.Handle("/api/communities/{id}", middleware.Gzip(middleware.ETag(http.HandlerFunc(communityHandler.GetCommunityByID)))).Methods("GET")
-
-	// Alias for drill-down - same as /api/communities/{id} but matches tiered API convention
-	r.Handle("/api/graph/community/{id}", middleware.Gzip(middleware.ETag(http.HandlerFunc(communityHandler.GetCommunityByID)))).Methods("GET")
+	if !cfg.RevisionReadsEnabled {
+		r.Handle("/api/graph/community/{id}", middleware.Gzip(middleware.ETag(http.HandlerFunc(communityHandler.GetCommunityByID)))).Methods("GET")
+	}
 
 	// Admin: toggle background services (gated)
 	admin := handlers.NewAdminHandler(q)

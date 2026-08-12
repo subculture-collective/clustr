@@ -97,6 +97,9 @@ CREATE TABLE graph_nodes (
 -- CREATE INDEX idx_graph_nodes_name ON graph_nodes(name);
 CREATE INDEX idx_graph_nodes_name_hash ON graph_nodes (substring(name, 1, 10));
 CREATE INDEX idx_graph_nodes_type ON graph_nodes(type) WHERE type IS NOT NULL;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE INDEX idx_graph_nodes_spatial_nonnull ON graph_nodes USING gist (pos_x, pos_y, pos_z)
+WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL AND pos_z IS NOT NULL;
 -- Expression index matching the query pattern in GetPrecalculatedGraphDataCappedAll/Filtered
 -- This mirrors the ORDER BY clause: ORDER BY (CASE WHEN val ~ '^[0-9]+$' THEN CAST(val AS BIGINT) ELSE 0 END) DESC
 -- Performance note: regex check is necessary to avoid CAST errors on non-numeric strings
@@ -152,6 +155,37 @@ CREATE TABLE graph_community_links (
 CREATE INDEX idx_community_members_node ON graph_community_members(node_id);
 CREATE INDEX idx_community_links_source ON graph_community_links(source_community_id);
 CREATE INDEX idx_community_links_target ON graph_community_links(target_community_id);
+
+CREATE TABLE graph_community_hierarchy (
+    node_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL CHECK (level >= 0),
+    community_id INTEGER NOT NULL,
+    parent_community_id INTEGER,
+    centroid_x DOUBLE PRECISION,
+    centroid_y DOUBLE PRECISION,
+    centroid_z DOUBLE PRECISION,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (node_id, level)
+);
+CREATE INDEX idx_hierarchy_level ON graph_community_hierarchy(level);
+CREATE INDEX idx_hierarchy_community ON graph_community_hierarchy(level, community_id);
+CREATE INDEX idx_hierarchy_parent ON graph_community_hierarchy(level, parent_community_id);
+
+CREATE TABLE graph_bundles (
+    source_community_id INTEGER NOT NULL REFERENCES graph_communities(id) ON DELETE CASCADE,
+    target_community_id INTEGER NOT NULL REFERENCES graph_communities(id) ON DELETE CASCADE,
+    weight INTEGER NOT NULL DEFAULT 0,
+    avg_strength DOUBLE PRECISION,
+    control_x DOUBLE PRECISION,
+    control_y DOUBLE PRECISION,
+    control_z DOUBLE PRECISION,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (source_community_id, target_community_id)
+);
+CREATE INDEX idx_bundles_source ON graph_bundles(source_community_id);
+CREATE INDEX idx_bundles_target ON graph_bundles(target_community_id);
+CREATE INDEX idx_bundles_weight ON graph_bundles(weight DESC);
 
 CREATE TABLE subreddit_relationships (
     id SERIAL PRIMARY KEY,

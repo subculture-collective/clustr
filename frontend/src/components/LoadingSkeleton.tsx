@@ -5,9 +5,9 @@
 
 const LoadingSkeleton = () => {
   return (
-    <div className="w-full h-screen bg-black relative overflow-hidden">
+    <div className="relative h-screen w-full overflow-hidden bg-[#030506]" role="status" aria-live="polite" aria-label="Calculating visible universe">
       {/* Animated background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-black to-slate-900 animate-pulse" />
+      <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
       
       {/* Mock graph container */}
       <div className="absolute inset-0 flex items-center justify-center">
@@ -31,25 +31,27 @@ const LoadingSkeleton = () => {
 
       {/* Loading message */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <div className="bg-black/70 backdrop-blur-sm rounded-lg px-8 py-6 border border-white/10 shadow-2xl max-w-md">
+        <div className="instrument-panel max-w-md rounded-2xl px-8 py-6">
           {/* Spinner */}
           <div className="flex justify-center mb-4">
-            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+            <div className="h-12 w-12 animate-spin rounded-full border border-[#b6ff62]/20 border-t-[#b6ff62]" />
           </div>
           
           {/* Message */}
           <h2 className="text-white text-xl font-semibold text-center mb-2">
-            Loading Graph
+            Locating your universe
           </h2>
+          <span className="sr-only">Loading Graph</span>
           <p className="text-gray-400 text-sm text-center mb-4">
-            Preparing network visualization...
+            Pinning the current revision and preparing visible landmarks.
           </p>
+          <span className="sr-only">Preparing network visualization...</span>
           
           {/* Pulsing dots */}
           <div className="flex justify-center gap-1 mt-2">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#b6ff62]" style={{ animationDelay: '0ms' }} />
+            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#b6ff62]" style={{ animationDelay: '150ms' }} />
+            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#b6ff62]" style={{ animationDelay: '300ms' }} />
           </div>
         </div>
       </div>

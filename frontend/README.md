@@ -62,12 +62,22 @@ The CI will enforce the new limits on subsequent PRs.
 
 ## Environment
 
-- `VITE_API_URL` — Base for API calls (default `/api`).
+- `VITE_API_URL` — Base for API calls (default `/api`). It is a Vite build-time
+  value. The Docker image uses the same-origin proxy unless built with
+  `--build-arg VITE_API_URL=https://api.example.test`; passing this value to the
+  running Nginx container does not modify compiled assets.
 - Optional render caps (client-side):
   - `VITE_MAX_RENDER_NODES`
   - `VITE_MAX_RENDER_LINKS`
 
 The frontend fetches `${VITE_API_URL || '/api'}/graph?max_nodes=...&max_links=...` and renders the result.
+
+### Deployment probes
+
+Through the frontend proxy, `GET /api/health` is backend liveness and
+`GET /api/ready` is fail-closed readiness. The latter requires a current schema
+and published graph revision, so it is the correct staging/prod gate after
+migration and publication complete.
 
 ## Mobile Support
 
@@ -151,4 +161,3 @@ The frontend includes an edge bundling feature that reduces visual clutter in de
 - Core logic: `src/rendering/EdgeBundler.ts`
 - Integration: `src/components/Graph3D.tsx`
 - Uses THREE.js `TubeGeometry` and `CatmullRomCurve3` for smooth curves
-

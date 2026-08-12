@@ -49,8 +49,8 @@ WITH sel_nodes AS (
 SELECT
         'node' AS data_type,
         n.id,
-        n.name,
-        CAST(n.val AS TEXT) AS val,
+        COALESCE(n.name, '') AS name,
+        COALESCE(CAST(n.val AS TEXT), '') AS val,
     n.type,
     n.pos_x,
     n.pos_y,
@@ -62,8 +62,8 @@ UNION ALL
 SELECT
         'link' AS data_type,
         CAST(l.id AS TEXT),
-        NULL AS name,
-        CAST(NULL AS TEXT) AS val,
+        '' AS name,
+        '' AS val,
         NULL AS type,
     NULL as pos_x,
     NULL as pos_y,
@@ -178,7 +178,7 @@ INSERT INTO graph_links (
 ) RETURNING *;
 
 -- name: ClearGraphTables :exec
-TRUNCATE TABLE graph_nodes, graph_links;
+TRUNCATE TABLE graph_nodes, graph_links CASCADE;
 
 INSERT INTO graph_nodes (id, name, val, type)
 VALUES ($1, $2, $3, $4);

@@ -27,7 +27,7 @@ function getStoredThemeMode(): ThemeMode {
   } catch {
     // ignore localStorage errors
   }
-  return 'system';
+  return 'dark';
 }
 
 function getStoredHighContrast(): boolean {

@@ -6,13 +6,13 @@ describe('useMobileDetect', () => {
     let originalInnerWidth: number;
     let originalNavigator: Navigator;
     let originalDevicePixelRatio: number;
-    let originalOntouchstart: any;
+    let originalOntouchstart: unknown;
 
     beforeEach(() => {
         originalInnerWidth = window.innerWidth;
         originalNavigator = window.navigator;
         originalDevicePixelRatio = window.devicePixelRatio;
-        originalOntouchstart = (window as any).ontouchstart;
+        originalOntouchstart = (window as unknown as { ontouchstart?: unknown }).ontouchstart;
     });
 
     afterEach(() => {
@@ -33,9 +33,9 @@ describe('useMobileDetect', () => {
             value: originalDevicePixelRatio,
         });
         if (originalOntouchstart === undefined) {
-            delete (window as any).ontouchstart;
+            delete (window as unknown as { ontouchstart?: unknown }).ontouchstart;
         } else {
-            (window as any).ontouchstart = originalOntouchstart;
+            (window as unknown as { ontouchstart?: unknown }).ontouchstart = originalOntouchstart;
         }
     });
 

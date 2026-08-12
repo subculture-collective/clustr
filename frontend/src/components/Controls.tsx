@@ -192,7 +192,7 @@ export default function Controls(props: Props) {
           <button
             className="px-2 py-1 rounded border bg-red-600 border-red-400 hover:bg-red-700 text-white text-sm"
             onClick={() => onShowAdmin?.()}
-            aria-label="Show admin panel"
+            aria-label="Admin"
           >
             Admin
           </button>

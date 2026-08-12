@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -64,6 +65,10 @@ func initTokenManager() error {
 
 // getAccessToken returns a valid access token, refreshing if necessary.
 func (tm *tokenManager) getAccessToken() (string, error) {
+	return tm.getAccessTokenContext(context.Background())
+}
+
+func (tm *tokenManager) getAccessTokenContext(ctx context.Context) (string, error) {
 	tm.mu.RLock()
 	// Check if we have a valid token (with 60s buffer)
 	if tm.accessToken != "" && time.Now().Add(60*time.Second).Before(tm.tokenExpiry) {
@@ -83,11 +88,18 @@ func (tm *tokenManager) getAccessToken() (string, error) {
 	}
 
 	// Fetch new token
-	return tm.refreshTokenLocked()
+	return tm.refreshTokenLocked(ctx)
+}
+
+func (tm *tokenManager) invalidate() {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.accessToken = ""
+	tm.tokenExpiry = time.Time{}
 }
 
 // refreshTokenLocked fetches a new access token. Must be called with write lock held.
-func (tm *tokenManager) refreshTokenLocked() (string, error) {
+func (tm *tokenManager) refreshTokenLocked(ctx context.Context) (string, error) {
 	if tm.clientID == "" || tm.clientSecret == "" {
 		return "", fmt.Errorf("OAuth credentials not initialized")
 	}
@@ -98,7 +110,7 @@ func (tm *tokenManager) refreshTokenLocked() (string, error) {
 
 	ua := config.Load().UserAgent
 	build := func() (*http.Request, error) {
-		req, _ := http.NewRequest("POST", "https://www.reddit.com/api/v1/access_token", strings.NewReader(data.Encode()))
+		req, _ := http.NewRequestWithContext(ctx, "POST", "https://www.reddit.com/api/v1/access_token", strings.NewReader(data.Encode()))
 		req.SetBasicAuth(tm.clientID, tm.clientSecret)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("User-Agent", ua)
@@ -129,7 +141,7 @@ func (tm *tokenManager) refreshTokenLocked() (string, error) {
 		ExpiresIn   int    `json:"expires_in"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tokenResp); err != nil {
 		log.Printf("⚠️ Failed to decode token response: %v", err)
 		return "", err
 	}
@@ -157,7 +169,7 @@ func (tm *tokenManager) refreshTokenLocked() (string, error) {
 		defer tm.mu.Unlock()
 		// Proactively refresh token
 		log.Printf("🔄 Proactively refreshing OAuth token")
-		if _, err := tm.refreshTokenLocked(); err != nil {
+		if _, err := tm.refreshTokenLocked(context.Background()); err != nil {
 			log.Printf("⚠️ Proactive token refresh failed: %v", err)
 		} else {
 			log.Printf("✓ Token refreshed successfully")
@@ -184,7 +196,7 @@ func (tm *tokenManager) rotateCredentials(newClientID, newClientSecret string) e
 	tm.clientSecret = newClientSecret
 
 	// Immediately try to get a token with new credentials
-	_, err := tm.refreshTokenLocked()
+	_, err := tm.refreshTokenLocked(context.Background())
 	if err != nil {
 		// Rollback on failure
 		tm.clientID = oldID
@@ -200,4 +212,8 @@ func (tm *tokenManager) rotateCredentials(newClientID, newClientSecret string) e
 // getAccessToken is the package-level function used by the rest of the crawler.
 func getAccessToken() (string, error) {
 	return globalTokenManager.getAccessToken()
+}
+
+func getAccessTokenContext(ctx context.Context) (string, error) {
+	return globalTokenManager.getAccessTokenContext(ctx)
 }

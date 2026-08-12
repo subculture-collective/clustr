@@ -3,10 +3,9 @@ package crawler
 import (
 	"context"
 	"database/sql"
-
+	"errors"
 	"fmt"
 	"log"
-
 	"time"
 
 	_ "github.com/lib/pq" // Import the postgres driver
@@ -32,10 +31,7 @@ func checkAndRequeueStaleSubreddits(ctx context.Context, q *db.Queries) error {
 			continue
 		}
 
-		if err := q.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{
-			SubredditID: subreddit.ID,
-			EnqueuedBy:  sql.NullString{String: "system", Valid: true},
-		}); err != nil {
+		if err := EnsureJob(ctx, q, subreddit.ID, "system-stale"); err != nil {
 			log.Printf("⚠️ Failed to requeue stale subreddit r/%s: %v", sub, err)
 		}
 	}
@@ -91,6 +87,9 @@ func (c *Crawler) Start(ctx context.Context) {
 				log.Printf("⚠️ Error processing job: %v", err)
 			}
 		case <-maintenanceTicker.C:
+			if err := ReconsiderDiscoveryCandidates(ctx, c.queries, cfg.DiscoveryDailyBudget); err != nil {
+				log.Printf("⚠️ Failed to promote discovery candidates: %v", err)
+			}
 			// Requeue jobs that are ready to retry
 			if err := RequeueRetryableJobs(ctx, c.queries); err != nil {
 				log.Printf("⚠️ Failed to requeue retryable jobs: %v", err)
@@ -117,13 +116,68 @@ func (c *Crawler) Stop() {
 
 // processNextJob handles a single crawl job
 func (c *Crawler) processNextJob(ctx context.Context) error {
-	job, err := ClaimNextJob(ctx, c.queries)
+	if !config.Load().CrawlerLifecycleEnabled {
+		job, err := ClaimNextJob(ctx, c.queries)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim legacy crawl job: %w", err)
+		}
+		return handleJob(ctx, c.queries, job)
+	}
+	attempt, err := ClaimNextCrawlAttempt(ctx, c.queries, "")
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
-		return fmt.Errorf("failed to claim next job: %w", err)
+		return fmt.Errorf("failed to claim next crawl attempt: %w", err)
 	}
+	executionCtx, stopHeartbeat, leaseErrors := HeartbeatLease(ctx, c.queries, attempt)
+	defer stopHeartbeat()
 
-	return handleJob(ctx, c.queries, job)
+	// crawl_jobs remains the temporary compatibility Adapter for the existing
+	// executor and admin routes. EnsureJob has made it queued for this request.
+	job, err := legacyJobForSubreddit(executionCtx, c.queries, attempt.SubredditID)
+	result := AttemptResult{Outcome: OutcomeComplete}
+	if err == nil {
+		result, err = executeJob(executionCtx, c.queries, job)
+	}
+	select {
+	case leaseErr := <-leaseErrors:
+		err = fmt.Errorf("crawl attempt lease lost: %w", leaseErr)
+		result.Outcome = OutcomeRetryableFailure
+		result.ErrorClass = "lease_lost"
+	default:
+	}
+	if err != nil {
+		result.ErrorMessage = err.Error()
+		var redditError *RedditHTTPError
+		switch {
+		case result.ErrorClass == "lease_lost":
+			// Preserve the heartbeat classification established above.
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			result.Outcome = OutcomeCancelled
+			result.ErrorClass = "cancelled"
+		case errors.As(err, &redditError) && !redditError.Retryable:
+			result.Outcome = OutcomePermanentFailure
+			result.ErrorClass = "reddit_permanent"
+		default:
+			result.Outcome = OutcomeRetryableFailure
+			result.ErrorClass = "crawl_error"
+		}
+	}
+	finishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if finishErr := FinishCrawlAttempt(finishCtx, c.queries, attempt, result, config.Load().CrawlFreshness); finishErr != nil {
+		return fmt.Errorf("finish crawl attempt: %w", finishErr)
+	}
+	return err
+}
+
+func legacyJobForSubreddit(ctx context.Context, q *db.Queries, subredditID int32) (db.CrawlJob, error) {
+	var job db.CrawlJob
+	err := q.DB().QueryRowContext(ctx, `SELECT id, subreddit_id, status, retries, last_attempt, duration_ms, enqueued_by, created_at, updated_at FROM crawl_jobs WHERE subreddit_id=$1`, subredditID).
+		Scan(&job.ID, &job.SubredditID, &job.Status, &job.Retries, &job.LastAttempt, &job.DurationMs, &job.EnqueuedBy, &job.CreatedAt, &job.UpdatedAt)
+	return job, err
 }

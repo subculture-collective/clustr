@@ -6,13 +6,14 @@ services:
             context: .
             dockerfile: Dockerfile
         depends_on:
-            - db
+            migrate:
+                condition: service_completed_successfully
         networks:
             web:
                 aliases:
                     - reddit-api
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
         volumes:
             # Mount backups volume read-only to expose via HTTP endpoints
             - pgbackups:/app/backups:ro
@@ -25,7 +26,7 @@ services:
                     'CMD',
                     'bash',
                     '-c',
-                    'set -eo pipefail; curl -f http://localhost:8000/health | jq -e ''.status == "ok"'' > /dev/null',
+                    'set -eo pipefail; curl -f http://localhost:8000/ready | jq -e ''.status == "ready"'' > /dev/null',
                 ]
             interval: 30s
             timeout: 5s
@@ -39,11 +40,12 @@ services:
             context: .
             dockerfile: Dockerfile.crawler
         depends_on:
-            - db
+            migrate:
+                condition: service_completed_successfully
         networks:
             - web
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
 
     db:
         container_name: reddit-cluster-db
@@ -56,36 +58,46 @@ services:
         volumes:
             # Mount the named volume at the default postgres data path
             - postgres_data:/var/lib/postgresql/data
-            # Mount only the base schema to ensure correct init order
-            - ./migrations/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
         networks:
             - web
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+            interval: 5s
+            timeout: 5s
+            retries: 20
         command: postgres -c fsync=on -c synchronous_commit=on -c full_page_writes=on -c wal_level=replica
+
+    migrate:
+        container_name: reddit-cluster-migrate
+        build:
+            context: .
+            dockerfile: Dockerfile.migrate
+        depends_on:
+            db:
+                condition: service_healthy
+        env_file:
+            - ${CLUSTR_ENV_FILE:-.env}
+        networks:
+            - web
+        restart: 'no'
 
     precalculate:
         container_name: reddit-cluster-precalculate
         restart: unless-stopped
+        # Production calculation runs on Kvant. This profile is retained only
+        # for an explicit same-host rollback or development deployment.
+        profiles: ['local-precalculate']
         build:
             context: .
             dockerfile: Dockerfile.precalculate
-        command: >
-            sh -c "
-            while :; do
-                # Run precalculation
-                /app/precalculate || echo 'Precalculation failed at $(date)'
-
-                # Run database backup
-                /app/scripts/backup.sh || echo 'Backup failed at $(date)'
-
-                # Sleep for an hour
-                sleep 3600
-            done"
+        command: ['/app/precalculate']
         depends_on:
-            - db
+            migrate:
+                condition: service_completed_successfully
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
         networks:
             - web
         volumes:
@@ -101,9 +113,10 @@ services:
             dockerfile: Dockerfile.precalculate
         command: ['/bin/sh', '-lc', '/app/scripts/backup-runner.sh']
         depends_on:
-            - db
+            migrate:
+                condition: service_completed_successfully
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
         environment:
             - BACKUP_INTERVAL=24h
         networks:
@@ -119,13 +132,22 @@ services:
             context: ../frontend
             dockerfile: Dockerfile
         depends_on:
-            - api
+            api:
+                condition: service_healthy
         networks:
             web:
                 aliases:
                     - reddit_frontend
         env_file:
-            - .env
+            - ${CLUSTR_ENV_FILE:-.env}
+        healthcheck:
+            # Verify the public frontend path reaches the API's fail-closed
+            # readiness contract, not merely that Nginx is serving assets.
+            test: ['CMD-SHELL', 'wget -q -O /dev/null http://localhost/api/ready']
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
 
     prometheus:
         container_name: reddit-cluster-prometheus

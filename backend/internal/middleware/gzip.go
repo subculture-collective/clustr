@@ -20,28 +20,46 @@ type compressionResponseWriter struct {
 	encoding    string
 	wroteHeader bool
 	headerSet   bool
+	status      int
 }
 
 func (w *compressionResponseWriter) WriteHeader(status int) {
-	if !w.wroteHeader {
-		w.wroteHeader = true
-		w.ResponseWriter.WriteHeader(status)
+	if !w.wroteHeader && w.status == 0 {
+		w.status = status
 	}
 }
 
-func (w *compressionResponseWriter) Write(b []byte) (int, error) {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
+func (w *compressionResponseWriter) setCompressionHeaders() {
+	if w.headerSet {
+		return
 	}
+	w.headerSet = true
+	w.ResponseWriter.Header().Set("Content-Encoding", w.encoding)
+	w.ResponseWriter.Header().Del("Content-Length")
+}
 
-	// Set Content-Encoding on first write (after WriteHeader is called)
-	if !w.headerSet {
-		w.headerSet = true
-		w.ResponseWriter.Header().Set("Content-Encoding", w.encoding)
-		w.ResponseWriter.Header().Del("Content-Length")
+func (w *compressionResponseWriter) Write(b []byte) (int, error) {
+	w.setCompressionHeaders()
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		if w.status == 0 {
+			w.status = http.StatusOK
+		}
+		w.ResponseWriter.WriteHeader(w.status)
 	}
 
 	return w.writer.Write(b)
+}
+
+func (w *compressionResponseWriter) finishEmpty() {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	w.ResponseWriter.WriteHeader(w.status)
 }
 
 // parseAcceptEncoding parses the Accept-Encoding header and returns the best
@@ -126,9 +144,14 @@ func Gzip(next http.Handler) http.Handler {
 		if encoding == "br" {
 			// Get brotli writer from pool
 			br := brPool.Get().(*brotli.Writer)
-			defer brPool.Put(br)
 			br.Reset(w)
-			defer br.Close()
+			completed := false
+			defer func() {
+				if !completed {
+					br.Reset(io.Discard)
+					brPool.Put(br)
+				}
+			}()
 
 			// Wrap response writer (Content-Encoding will be set on first write)
 			brw := &compressionResponseWriter{
@@ -137,6 +160,14 @@ func Gzip(next http.Handler) http.Handler {
 				encoding:       "br",
 			}
 			next.ServeHTTP(brw, r)
+			if brw.wroteHeader {
+				_ = br.Close()
+			} else {
+				brw.finishEmpty()
+				br.Reset(io.Discard)
+			}
+			brPool.Put(br)
+			completed = true
 			return
 		}
 
@@ -144,9 +175,14 @@ func Gzip(next http.Handler) http.Handler {
 		if encoding == "gzip" {
 			// Get gzip writer from pool
 			gz := gzPool.Get().(*gzip.Writer)
-			defer gzPool.Put(gz)
 			gz.Reset(w)
-			defer gz.Close()
+			completed := false
+			defer func() {
+				if !completed {
+					gz.Reset(io.Discard)
+					gzPool.Put(gz)
+				}
+			}()
 
 			// Wrap response writer (Content-Encoding will be set on first write)
 			gzw := &compressionResponseWriter{
@@ -155,6 +191,14 @@ func Gzip(next http.Handler) http.Handler {
 				encoding:       "gzip",
 			}
 			next.ServeHTTP(gzw, r)
+			if gzw.wroteHeader {
+				_ = gz.Close()
+			} else {
+				gzw.finishEmpty()
+				gz.Reset(io.Discard)
+			}
+			gzPool.Put(gz)
+			completed = true
 			return
 		}
 

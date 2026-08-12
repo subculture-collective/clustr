@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -65,6 +67,11 @@ func main() {
 
 	router := api.NewRouter(queries)
 
-	logger.Info("Server running", "address", ":8000", "url", "http://localhost:8000")
-	log.Fatal(http.ListenAndServe(":8000", router))
+	port := os.Getenv("API_PORT")
+	if port == "" {
+		port = "8000"
+	}
+	address := net.JoinHostPort("", port)
+	logger.Info("Server running", "address", address, "url", "http://localhost:"+port)
+	log.Fatal(http.ListenAndServe(address, router))
 }

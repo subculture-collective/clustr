@@ -1,8 +1,11 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,6 +14,10 @@ import (
 
 // FetchUserSubreddits fetches the list of subreddits a user has posted or commented in.
 func FetchUserSubreddits(username string, limit int) ([]string, error) {
+	return FetchUserSubredditsContext(context.Background(), username, limit)
+}
+
+func FetchUserSubredditsContext(ctx context.Context, username string, limit int) ([]string, error) {
 	endpoints := []string{
 		fmt.Sprintf("https://oauth.reddit.com/user/%s/submitted.json?limit=%d", username, limit),
 		fmt.Sprintf("https://oauth.reddit.com/user/%s/comments.json?limit=%d", username, limit),
@@ -19,12 +26,11 @@ func FetchUserSubreddits(username string, limit int) ([]string, error) {
 	subreddits := make(map[string]bool)
 
 	for _, url := range endpoints {
-		resp, err := authenticatedGet(url)
+		resp, err := authenticatedGetWithContext(ctx, url)
 		if err != nil {
 			log.Printf("⚠️ Failed to fetch %s: %v", url, err)
 			continue
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != 200 {
 			log.Printf("⚠️ Non-200 status for %s: %d", url, resp.StatusCode)
@@ -41,10 +47,12 @@ func FetchUserSubreddits(username string, limit int) ([]string, error) {
 			} `json:"data"`
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&parsed); err != nil {
+			resp.Body.Close()
 			log.Printf("⚠️ Failed to decode JSON from %s: %v", url, err)
 			continue
 		}
+		resp.Body.Close()
 
 		for _, child := range parsed.Data.Children {
 			if sub := child.Data.Subreddit; sub != "" {
@@ -62,10 +70,14 @@ func FetchUserSubreddits(username string, limit int) ([]string, error) {
 
 // FetchRecentUserSubreddits fetches the list of subreddits a user has recently posted or commented in.
 func FetchRecentUserSubreddits(username string, limit int) ([]string, error) {
+	return FetchRecentUserSubredditsContext(context.Background(), username, limit)
+}
+
+func FetchRecentUserSubredditsContext(ctx context.Context, username string, limit int) ([]string, error) {
 	uname := strings.TrimSpace(username)
 	// Attempt 1: OAuth user listing
 	u1 := fmt.Sprintf("https://oauth.reddit.com/user/%s/.json?limit=%d&raw_json=1", url.PathEscape(uname), limit)
-	if subs, ok, err := tryUserListingOAuth(u1); err == nil && ok {
+	if subs, ok, err := tryUserListingOAuthContext(ctx, u1); err == nil && ok {
 		return subs, nil
 	} else if err != nil && !ok {
 		// hard error (e.g., network). Return error to allow upstream handling.
@@ -79,7 +91,7 @@ func FetchRecentUserSubreddits(username string, limit int) ([]string, error) {
 	q.Set("sort", "new")
 	q.Set("type", "link")
 	u2 := "https://oauth.reddit.com/search.json?" + q.Encode()
-	if subs, ok, err := trySearchOAuth(u2); err == nil && ok {
+	if subs, ok, err := trySearchOAuthContext(ctx, u2); err == nil && ok {
 		return subs, nil
 	} else if err != nil && !ok {
 		return nil, err
@@ -87,7 +99,7 @@ func FetchRecentUserSubreddits(username string, limit int) ([]string, error) {
 
 	// Attempt 3: Public old.reddit.com listing
 	u3 := fmt.Sprintf("https://old.reddit.com/user/%s/.json?limit=%d&raw_json=1", url.PathEscape(uname), limit)
-	if subs, ok, err := tryUserListingPublic(u3); err == nil && ok {
+	if subs, ok, err := tryUserListingPublicContext(ctx, u3); err == nil && ok {
 		return subs, nil
 	} else if err != nil && !ok {
 		return nil, err
@@ -109,7 +121,7 @@ func parseUserListing(resp *http.Response) ([]string, error) {
 			} `json:"children"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("failed to decode: %w", err)
 	}
 	seen := map[string]bool{}
@@ -126,8 +138,15 @@ func parseUserListing(resp *http.Response) ([]string, error) {
 
 // try helpers return (subs, ok, err). ok=false when caller should try next strategy; err!=nil with ok=false means hard error.
 func tryUserListingOAuth(u string) ([]string, bool, error) {
-	resp, err := authenticatedGet(u)
+	return tryUserListingOAuthContext(context.Background(), u)
+}
+func tryUserListingOAuthContext(ctx context.Context, u string) ([]string, bool, error) {
+	resp, err := authenticatedGetWithContext(ctx, u)
 	if err != nil {
+		var status *RedditHTTPError
+		if errors.As(err, &status) && (status.StatusCode == http.StatusUnauthorized || status.StatusCode == http.StatusForbidden || status.StatusCode == http.StatusNotFound) {
+			return nil, false, nil
+		}
 		return nil, false, fmt.Errorf("failed authenticated GET: %w", err)
 	}
 	defer resp.Body.Close()
@@ -145,8 +164,15 @@ func tryUserListingOAuth(u string) ([]string, bool, error) {
 }
 
 func trySearchOAuth(u string) ([]string, bool, error) {
-	resp, err := authenticatedGet(u)
+	return trySearchOAuthContext(context.Background(), u)
+}
+func trySearchOAuthContext(ctx context.Context, u string) ([]string, bool, error) {
+	resp, err := authenticatedGetWithContext(ctx, u)
 	if err != nil {
+		var status *RedditHTTPError
+		if errors.As(err, &status) && (status.StatusCode == http.StatusUnauthorized || status.StatusCode == http.StatusForbidden || status.StatusCode == http.StatusNotFound) {
+			return nil, false, nil
+		}
 		return nil, false, fmt.Errorf("failed OAuth search GET: %w", err)
 	}
 	defer resp.Body.Close()
@@ -165,7 +191,7 @@ func trySearchOAuth(u string) ([]string, bool, error) {
 			} `json:"children"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&parsed); err != nil {
 		return nil, false, fmt.Errorf("search decode failed: %w", err)
 	}
 	seen := map[string]bool{}
@@ -181,8 +207,15 @@ func trySearchOAuth(u string) ([]string, bool, error) {
 }
 
 func tryUserListingPublic(u string) ([]string, bool, error) {
-	resp, err := unauthenticatedGet(u)
+	return tryUserListingPublicContext(context.Background(), u)
+}
+func tryUserListingPublicContext(ctx context.Context, u string) ([]string, bool, error) {
+	resp, err := unauthenticatedGetContext(ctx, u)
 	if err != nil {
+		var status *RedditHTTPError
+		if errors.As(err, &status) && (status.StatusCode == http.StatusUnauthorized || status.StatusCode == http.StatusForbidden || status.StatusCode == http.StatusNotFound) {
+			return nil, false, nil
+		}
 		return nil, false, fmt.Errorf("failed public GET: %w", err)
 	}
 	defer resp.Body.Close()

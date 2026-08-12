@@ -12,13 +12,13 @@ import (
 
 // GraphNode represents a simplified node for diff comparison
 type GraphNode struct {
-	ID    string
-	Name  string
-	Val   string
-	Type  string
-	PosX  sql.NullFloat64
-	PosY  sql.NullFloat64
-	PosZ  sql.NullFloat64
+	ID   string
+	Name string
+	Val  string
+	Type string
+	PosX sql.NullFloat64
+	PosY sql.NullFloat64
+	PosZ sql.NullFloat64
 }
 
 // GraphLink represents a simplified link for diff comparison
@@ -108,7 +108,7 @@ func CalculateAndStoreDiffs(ctx context.Context, store VersionStore, versionID i
 	if oldSnapshot == nil {
 		// First version - all nodes and links are "add" operations
 		log.Printf("📊 First version - storing all %d nodes and %d links as additions", len(newSnapshot.Nodes), len(newSnapshot.Links))
-		
+
 		// Store node additions
 		for _, node := range newSnapshot.Nodes {
 			if err := store.CreateGraphDiff(ctx, db.CreateGraphDiffParams{
@@ -125,7 +125,7 @@ func CalculateAndStoreDiffs(ctx context.Context, store VersionStore, versionID i
 				return fmt.Errorf("failed to store node diff: %w", err)
 			}
 		}
-		
+
 		// Store link additions
 		for _, link := range newSnapshot.Links {
 			linkID := fmt.Sprintf("%s->%s", link.Source, link.Target)
@@ -138,7 +138,7 @@ func CalculateAndStoreDiffs(ctx context.Context, store VersionStore, versionID i
 				return fmt.Errorf("failed to store link diff: %w", err)
 			}
 		}
-		
+
 		return nil
 	}
 
@@ -268,13 +268,13 @@ func equalNullFloat(a, b sql.NullFloat64) bool {
 func CleanupOldVersions(ctx context.Context, store VersionStore) error {
 	cfg := config.Load()
 	retention := cfg.GetEnvInt("GRAPH_VERSION_RETENTION", 10)
-	
+
 	// Validate retention value (minimum 1 to prevent deleting all versions)
 	if retention < 1 {
 		log.Printf("⚠️ Invalid GRAPH_VERSION_RETENTION value %d, using minimum of 1", retention)
 		retention = 1
 	}
-	
+
 	count, err := store.CountGraphVersions(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to count versions: %w", err)
@@ -286,7 +286,7 @@ func CleanupOldVersions(ctx context.Context, store VersionStore) error {
 	}
 
 	log.Printf("🧹 Cleaning up old versions (keeping most recent %d of %d)", retention, count)
-	
+
 	if err := store.DeleteOldGraphVersions(ctx, int32(retention)); err != nil {
 		return fmt.Errorf("failed to delete old versions: %w", err)
 	}

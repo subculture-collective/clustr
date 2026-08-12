@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
 )
@@ -85,10 +86,7 @@ func (s *Service) executeScheduledJob(ctx context.Context, job db.ScheduledJob) 
 
 	// Enqueue a crawl job with the specified priority
 	if job.SubredditID.Valid {
-		err := s.queries.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{
-			SubredditID: job.SubredditID.Int32,
-			EnqueuedBy:  sql.NullString{String: "scheduler:" + job.Name, Valid: true},
-		})
+		err := crawler.EnsureJob(ctx, s.queries, job.SubredditID.Int32, "scheduler:"+job.Name)
 		if err != nil {
 			return err
 		}

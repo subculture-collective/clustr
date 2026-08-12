@@ -9,7 +9,7 @@ global.fetch = vi.fn();
 describe('Inspector', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (global.fetch as any).mockRejectedValue(new Error('API call failed'));
+    vi.mocked(global.fetch).mockRejectedValue(new Error('API call failed'));
   });
 
   it('renders nothing when no selection', () => {
@@ -176,7 +176,7 @@ describe('Inspector', () => {
       }
     };
 
-    (global.fetch as any).mockResolvedValueOnce({
+    vi.mocked(global.fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => mockNodeDetails
     });

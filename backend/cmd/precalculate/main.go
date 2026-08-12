@@ -7,23 +7,31 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/admin"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/graph"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
 )
 
 func main() {
 	// Parse command-line flags
 	fullRebuild := flag.Bool("full", false, "Force a full rebuild instead of incremental update")
+	once := flag.Bool("once", false, "Run one calculation/publication and exit")
+	publishOnly := flag.Bool("publish-only", false, "Publish the existing graph workspace without rebuilding it (requires --once)")
 	flag.Parse()
+	if *publishOnly && !*once {
+		log.Fatal("--publish-only requires --once")
+	}
 
 	// Load configuration
 	cfg := config.Load()
@@ -69,9 +77,10 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	// Configure connection pool for precalculation (moderate connections needed)
-	dbConn.SetMaxOpenConns(15)                  // Moderate pool for graph computation
-	dbConn.SetMaxIdleConns(5)                   // Keep some idle connections
+	// A bounded CPU-first worker must not consume the API's database pool.
+	poolCap := positiveIntEnv("PRECALC_DB_MAX_OPEN_CONNS", 5)
+	dbConn.SetMaxOpenConns(poolCap)
+	dbConn.SetMaxIdleConns(min(poolCap, 2))
 	dbConn.SetConnMaxLifetime(10 * time.Minute) // Longer lifetime for batch jobs
 	dbConn.SetConnMaxIdleTime(5 * time.Minute)  // Longer idle time for batch jobs
 
@@ -82,6 +91,10 @@ func main() {
 		if err := dbConn.PingContext(ctx); err != nil {
 			logger.Error("Failed to ping database", "error", err)
 			log.Fatalf("Failed to ping database: %v", err)
+		}
+		if err := migrations.VerifyCurrent(ctx, dbConn); err != nil {
+			logger.Error("Database schema is incompatible", "error", err)
+			log.Fatal(err)
 		}
 		logger.Info("Database connection established")
 	}
@@ -94,7 +107,8 @@ func main() {
 	}
 	graphService := graph.NewService(queries)
 
-	ctx := context.Background()
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	// On startup: optionally force-clear graph tables if PRECALC_FORCE_CLEAR=true
 	if os.Getenv("PRECALC_FORCE_CLEAR") == "1" || os.Getenv("PRECALC_FORCE_CLEAR") == "true" {
 		logger.Info("PRECALC_FORCE_CLEAR enabled: clearing graph tables and restarting from scratch")
@@ -104,25 +118,24 @@ func main() {
 		}
 	}
 
-	// Reset any incomplete crawl jobs so they can be resumed
-	resetOlder := time.Duration(cfg.ResetCrawlingAfterMin) * time.Minute
-	if err := crawler.ResetIncompleteJobs(ctx, queries, resetOlder); err != nil {
-		logger.Warn("Failed to reset incomplete jobs", "error", err)
-	}
+	// Crawl leases, stale scheduling, and retry recovery belong to the crawler
+	// lifecycle service. A graph worker must never mutate crawl scheduling state.
 
-	// Requeue stale subreddits for recalculation based on configured StaleDays
-	staleDays := cfg.StaleDays
-	if staleDays > 0 {
-		if err := crawler.RequeueStaleSubreddits(ctx, queries, time.Duration(staleDays)*24*time.Hour); err != nil {
-			logger.Warn("Failed to requeue stale subreddits", "error", err)
+	// Always run once at start when enabled (may defer if not enough data yet).
+	// A one-shot invocation is used by remote workers and deployment gates, so it
+	// must fail closed instead of reporting success after a skipped/failed build.
+	if err := runOnce(ctx, dbConn, queries, graphService, *fullRebuild, *publishOnly); err != nil {
+		logger.Error("Graph calculation/publication run failed", "error", err)
+		if *once {
+			log.Fatal(err)
 		}
 	}
-
-	// Always run once at start when enabled (may defer if not enough data yet)
-	runOnce(ctx, dbConn, queries, graphService, *fullRebuild)
+	if *once {
+		return
+	}
 
 	// Run continuously on a configurable interval (default 1h)
-	interval := time.Hour
+	interval := cfg.PublicationInterval
 	if iv := os.Getenv("PRECALC_INTERVAL"); iv != "" {
 		if d, err := time.ParseDuration(iv); err == nil {
 			interval = d
@@ -139,9 +152,26 @@ func main() {
 				continue
 			}
 			// Scheduled runs use incremental mode by default
-			runOnce(ctx, dbConn, queries, graphService, false)
+			if err := runOnce(ctx, dbConn, queries, graphService, false, false); err != nil {
+				logger.Error("Scheduled graph calculation/publication run failed", "error", err)
+			}
 		}
 	}
+}
+
+func positiveIntEnv(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // hasMinSubredditsWithPosts returns true if at least `min` distinct subreddits have posts stored
@@ -154,19 +184,30 @@ func hasMinSubredditsWithPosts(ctx context.Context, dbc *sql.DB, min int) (bool,
 	return cnt >= min, cnt, nil
 }
 
-func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService *graph.Service, fullRebuild bool) {
+func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService *graph.Service, fullRebuild, publishOnly bool) error {
+	sourceWatermark := time.Now().UTC()
 	// Defer precalc until at least two subreddits have been crawled (i.e., produced posts)
 	if ok, cnt, err := hasMinSubredditsWithPosts(ctx, dbc, 2); err != nil {
-		logger.Error("Precalc readiness check failed", "error", err)
-		return
+		return fmt.Errorf("precalculation readiness check: %w", err)
 	} else if !ok {
-		logger.Info("Precalc deferred: insufficient data", "subreddits_with_posts", cnt, "required", 2)
-		return
+		return fmt.Errorf("precalculation deferred: only %d subreddits have posts; require 2", cnt)
 	}
-	if err := graphService.PrecalculateGraphDataWithMode(ctx, fullRebuild); err != nil {
-		logger.Error("Failed to precalculate graph data", "error", err)
-		errorreporting.CaptureError(err)
-		return
+	if !publishOnly {
+		if err := graphService.PrecalculateGraphDataWithMode(ctx, fullRebuild); err != nil {
+			errorreporting.CaptureError(err)
+			return fmt.Errorf("precalculate graph data: %w", err)
+		}
+	} else {
+		logger.Info("Publishing existing graph workspace without recalculation")
+	}
+	// Publication is separate from the mutable build workspace.  The publisher
+	// stages a complete immutable snapshot and swaps its current pointer atomically;
+	// a publication failure leaves the last explorer revision intact.
+	if revisionID, err := graph.PublishRevisionAtWatermark(ctx, dbc, sourceWatermark); err != nil {
+		return fmt.Errorf("publish immutable graph revision: %w", err)
+	} else {
+		logger.Info("Published immutable graph revision", "revision_id", revisionID)
 	}
 	logger.Info("Graph data precalculated successfully")
+	return nil
 }

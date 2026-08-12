@@ -112,6 +112,9 @@ export class SDFTextRenderer {
         
         // Configure text appearance
         text.text = label.text.length > 28 ? label.text.slice(0, 27) + '…' : label.text;
+        // Keep label rendering deterministic and available offline. Troika's
+        // network default font made the scene depend on a third-party CDN.
+        (text as Text & { font: string }).font = '/fonts/NotoSans-Latin.woff';
         text.fontSize = this.fontSize * (label.size || 1);
         text.color = this.color;
         text.anchorX = 'center';

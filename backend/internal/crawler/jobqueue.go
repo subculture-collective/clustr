@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/lib/pq"
@@ -13,11 +12,23 @@ import (
 
 // EnsureJob enqueues a job for subredditID if absent, or resets to queued if failed/stale.
 func EnsureJob(ctx context.Context, q *db.Queries, subredditID int32, enqueuedBy string) error {
-	// Try insert queued; ON CONFLICT DO NOTHING is already in EnqueueCrawlJob.
-	return q.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{
+	// The durable request is authoritative after migration 000028.  Keep the
+	// legacy row populated while old admin/routes still read crawl_jobs.
+	if err := EnsureCrawlRequest(ctx, q, subredditID, enqueuedBy, 0); err != nil {
+		return err
+	}
+	err := q.EnqueueCrawlJob(ctx, db.EnqueueCrawlJobParams{
 		SubredditID: subredditID,
 		EnqueuedBy:  sql.NullString{String: enqueuedBy, Valid: enqueuedBy != ""},
 	})
+	if err != nil {
+		return err
+	}
+	// A legacy row may be a historical success.  It is only a compatibility
+	// projection now, so make it runnable when the request becomes due.
+	_, err = q.DB().ExecContext(ctx, `UPDATE crawl_jobs SET status='queued', visible_at=now(), updated_at=now()
+WHERE subreddit_id=$1 AND status <> 'crawling'`, subredditID)
+	return err
 }
 
 // PromoteNext attempts to pick the oldest queued job by creation time.
@@ -134,26 +145,6 @@ func ClaimNextJob(ctx context.Context, q *db.Queries) (db.CrawlJob, error) {
 	}
 	j.Status = "crawling"
 	return j, nil
-}
-
-// CalculateRetryDelay calculates the next retry delay with exponential backoff and jitter
-func CalculateRetryDelay(retryCount int32) time.Duration {
-	// Base delay: 1 minute
-	baseDelay := 1 * time.Minute
-
-	// Exponential backoff: 2^retryCount * baseDelay
-	// Capped at 24 hours
-	maxDelay := 24 * time.Hour
-	delay := baseDelay * time.Duration(1<<uint(retryCount))
-
-	if delay > maxDelay {
-		delay = maxDelay
-	}
-
-	// Add jitter: random value between 0 and 20% of the delay
-	jitter := time.Duration(float64(delay) * 0.2 * rand.Float64())
-
-	return delay + jitter
 }
 
 // MarkJobFailedWithRetry marks a job as failed and schedules it for retry if under max retries

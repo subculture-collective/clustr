@@ -1,11 +1,33 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestPublicAPIHealthAlias(t *testing.T) {
+	router := NewRouter(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/health status = %d, want 200", rr.Code)
+	}
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode API health response: %v", err)
+	}
+	if response.Status != "ok" {
+		t.Fatalf("API health status = %q, want ok", response.Status)
+	}
+}
 
 // TestSearchEndpointRegistered verifies the search endpoint is registered.
 // This test only validates route registration; handler functionality

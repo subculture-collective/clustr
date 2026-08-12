@@ -2,13 +2,15 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Smoke Tests', () => {
   test('homepage loads successfully', async ({ page }) => {
-    await page.goto('/');
-    
-    // Wait for the page to load
-    await page.waitForLoadState('networkidle');
-    
-    // Check that the page title is present
-    await expect(page).toHaveTitle(/reddit/i);
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    // Keep the delivery smoke aligned with the public product title rather
+    // than an implementation-era Reddit name.
+    await expect(page).toHaveTitle(/clustr/i);
+    // A continuously interactive graph can keep requests in flight, so
+    // network-idle is not a valid readiness signal. Assert the user-facing
+    // scene contract instead.
+    await expect(page.getByRole('application', { name: /interactive community universe/i })).toBeVisible();
   });
 
   test('app renders main UI elements', async ({ page }) => {

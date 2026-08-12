@@ -1,9 +1,13 @@
 import { defineConfig } from "vitest/config";
+import { loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { visualizer } from "rollup-plugin-visualizer";
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const proxyTarget = env.VITE_PROXY_TARGET || "http://localhost:8000";
+  return ({
   plugins: [
     react(),
     visualizer({
@@ -15,12 +19,12 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      "/api": "http://localhost:8000",
-      "/subreddits": "http://localhost:8000",
-      "/users": "http://localhost:8000",
-      "/posts": "http://localhost:8000",
-      "/comments": "http://localhost:8000",
-      "/jobs": "http://localhost:8000",
+      "/api": proxyTarget,
+      "/subreddits": proxyTarget,
+      "/users": proxyTarget,
+      "/posts": proxyTarget,
+      "/comments": proxyTarget,
+      "/jobs": proxyTarget,
     },
   },
   test: {
@@ -28,7 +32,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     css: true,
-    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', '**/.{idea,git,cache,output,temp}/**'],
+    // Browser benchmarks are Playwright suites, not unit tests. Keeping them
+    // out of Vitest prevents a full unit run from executing performance work.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', '**/benchmarks/**', '**/.{idea,git,cache,output,temp}/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
@@ -64,4 +70,5 @@ export default defineConfig({
       },
     },
   },
+  });
 });

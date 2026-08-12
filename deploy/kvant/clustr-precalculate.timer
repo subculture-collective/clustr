@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish Clustr graph revisions hourly on Kvant
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=clustr-precalculate.service
+
+[Install]
+WantedBy=timers.target

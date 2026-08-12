@@ -86,3 +86,19 @@ func TestLayoutConfigCustom(t *testing.T) {
 	os.Unsetenv("LAYOUT_EPSILON")
 	ResetForTest()
 }
+
+func TestBacklogActivationConfigHasSafeDefaultsAndAcceptsOverrides(t *testing.T) {
+	t.Setenv("CRAWL_BACKLOG_ACTIVATION_LIMIT", "")
+	t.Setenv("CRAWL_BACKLOG_ACTIVATION_WINDOW", "")
+	ResetForTest()
+	if cfg := Load(); cfg.BacklogActivationLimit != 24 || cfg.BacklogActivationWindow.String() != "1h0m0s" {
+		t.Fatalf("unexpected backlog activation defaults: limit=%d window=%s", cfg.BacklogActivationLimit, cfg.BacklogActivationWindow)
+	}
+	t.Setenv("CRAWL_BACKLOG_ACTIVATION_LIMIT", "7")
+	t.Setenv("CRAWL_BACKLOG_ACTIVATION_WINDOW", "15m")
+	ResetForTest()
+	if cfg := Load(); cfg.BacklogActivationLimit != 7 || cfg.BacklogActivationWindow.String() != "15m0s" {
+		t.Fatalf("unexpected backlog activation overrides: limit=%d window=%s", cfg.BacklogActivationLimit, cfg.BacklogActivationWindow)
+	}
+	ResetForTest()
+}

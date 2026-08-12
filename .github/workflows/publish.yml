@@ -25,7 +25,7 @@ jobs:
 
     strategy:
       matrix:
-        component: [server, crawler, precalculate]
+        component: [server, crawler, precalculate, migrate]
 
     steps:
       - name: Checkout code

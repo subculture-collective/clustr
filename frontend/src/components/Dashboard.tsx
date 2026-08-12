@@ -204,7 +204,7 @@ export default function Dashboard({ onViewMode, onFocusNode }: DashboardProps) {
     <div className="w-full h-screen bg-gray-900 text-white overflow-auto p-6">
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">Reddit Cluster Map - Dashboard</h1>
+          <div><p className="instrument-label mb-3">Data view / Current world</p><h1 className="text-3xl font-bold">Universe telemetry</h1><p className="mt-2 text-sm text-gray-400">A numerical reading of the same relationships drawn in the spatial explorer.</p></div>
           <div className="flex gap-2">
             <button
               onClick={() => onViewMode?.("3d")}

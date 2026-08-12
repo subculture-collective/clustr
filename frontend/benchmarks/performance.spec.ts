@@ -55,13 +55,13 @@ async function measureFPS(page: Page, durationMs: number): Promise<number> {
 // Helper to get memory metrics
 async function getMemoryMetrics(page: Page) {
   return await page.evaluate(() => {
-    // @ts-ignore - performance.memory is a Chrome-specific API
-    if (performance.memory) {
-      // @ts-ignore
+    const performanceWithMemory = performance as Performance & {
+      memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
+    };
+    if (performanceWithMemory.memory) {
       return {
-        usedJSHeapSize: performance.memory.usedJSHeapSize / 1024 / 1024, // Convert to MB
-        // @ts-ignore
-        totalJSHeapSize: performance.memory.totalJSHeapSize / 1024 / 1024,
+        usedJSHeapSize: performanceWithMemory.memory.usedJSHeapSize / 1024 / 1024, // Convert to MB
+        totalJSHeapSize: performanceWithMemory.memory.totalJSHeapSize / 1024 / 1024,
       };
     }
     return { usedJSHeapSize: 0, totalJSHeapSize: 0 };

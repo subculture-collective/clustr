@@ -3,7 +3,9 @@ package graph
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math"
 	"os"
@@ -123,7 +125,35 @@ func truncateUTF8(s string, max int) string {
 // CalculateSubredditRelationships via user activity co-occurrence (incremental upsert)
 func (s *Service) CalculateSubredditRelationships(ctx context.Context) error {
 	log.Printf("🔄 Starting subreddit relationship calculation (via co-occurrence)")
+	if q, ok := s.store.(*db.Queries); ok {
+		if err := s.store.ClearSubredditRelationships(ctx); err != nil {
+			return fmt.Errorf("clear subreddit relationships: %w", err)
+		}
+		result, err := q.DB().ExecContext(ctx, `
+WITH canonical AS (
+  SELECT a.subreddit_id source_id,b.subreddit_id target_id,count(*)::integer overlap_count
+  FROM user_subreddit_activity a
+  JOIN user_subreddit_activity b
+    ON b.user_id=a.user_id AND a.subreddit_id<b.subreddit_id
+  GROUP BY a.subreddit_id,b.subreddit_id
+), directed AS (
+  SELECT source_id,target_id,overlap_count FROM canonical
+  UNION ALL
+  SELECT target_id,source_id,overlap_count FROM canonical
+)
+INSERT INTO subreddit_relationships(source_subreddit_id,target_subreddit_id,overlap_count)
+SELECT source_id,target_id,overlap_count FROM directed
+ON CONFLICT(source_subreddit_id,target_subreddit_id) DO UPDATE
+SET overlap_count=EXCLUDED.overlap_count,updated_at=now()`)
+		if err != nil {
+			return fmt.Errorf("set-based subreddit relationship calculation: %w", err)
+		}
+		count, _ := result.RowsAffected()
+		log.Printf("✅ Upserted %d subreddit relationship rows with set-based SQL", count)
+		return nil
+	}
 
+	// Test and alternate-store fallback. Production uses the set-based path above.
 	acts, err := s.store.GetAllUserSubredditActivity(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch user activity for relationships: %w", err)
@@ -192,7 +222,26 @@ func (s *Service) CalculateUserActivity(ctx context.Context) error {
 		return fmt.Errorf("failed to clear user activity: %w", err)
 	}
 	log.Printf("🧹 Cleared existing user activity data")
+	if q, ok := s.store.(*db.Queries); ok {
+		result, err := q.DB().ExecContext(ctx, `
+INSERT INTO user_subreddit_activity(user_id,subreddit_id,activity_count)
+SELECT author_id,subreddit_id,count(*)::integer
+FROM (
+  SELECT author_id,subreddit_id FROM posts
+  UNION ALL
+  SELECT author_id,subreddit_id FROM comments
+) activity
+WHERE author_id IS NOT NULL AND subreddit_id IS NOT NULL
+GROUP BY author_id,subreddit_id`)
+		if err != nil {
+			return fmt.Errorf("set-based user activity calculation: %w", err)
+		}
+		count, _ := result.RowsAffected()
+		log.Printf("✅ Created %d user activity records with set-based SQL", count)
+		return nil
+	}
 
+	// Test and alternate-store fallback. Production uses the set-based path above.
 	users, err := s.store.GetAllUsers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch users: %w", err)
@@ -278,14 +327,14 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 
 	logger.InfoContext(ctx, "Starting graph data precalculation")
 	startTime := time.Now()
-	
+
 	// Track success/failure for proper state updates (must be function-level for defer)
 	var precalcErr error
 	var incrementalMode bool
-	
+
 	defer func() {
 		duration := time.Since(startTime)
-		
+
 		if precalcErr != nil {
 			logger.InfoContext(ctx, "Graph precalculation failed", "duration", duration, "error", precalcErr)
 			span.SetStatus(codes.Error, precalcErr.Error())
@@ -294,7 +343,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 		}
 		span.SetAttributes(attribute.String("total_duration", duration.String()))
 	}()
-	
+
 	// Get precalc state to determine if incremental update is possible
 	precalcState, err := s.store.GetPrecalcState(ctx)
 	var lastPrecalcAt sql.NullTime
@@ -308,10 +357,10 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			fullRebuild = true
 		}
 	}
-	
+
 	// Determine mode: incremental or full rebuild
 	incrementalMode = !fullRebuild && !config.Load().GetEnvBool("PRECALC_CLEAR_ON_START", false)
-	
+
 	// Count changes if in incremental mode
 	var changePercent float64
 	if incrementalMode {
@@ -333,7 +382,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 				"total_changes", totalChanges,
 				"change_percent", changePercent,
 			)
-			
+
 			// If changes exceed 20%, do a full rebuild instead
 			if changePercent > 20 {
 				logger.InfoContext(ctx, "Change percentage exceeds threshold, running full rebuild", "change_percent", changePercent)
@@ -341,53 +390,20 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			}
 		}
 	}
-	
+
 	span.SetAttributes(
 		attribute.Bool("incremental_mode", incrementalMode),
 		attribute.Float64("change_percent", changePercent),
 	)
-	
+
 	if incrementalMode {
 		logger.InfoContext(ctx, "Running incremental precalculation", "last_precalc_at", lastPrecalcAt.Time, "change_percent", changePercent)
 	} else {
 		logger.InfoContext(ctx, "Running full precalculation rebuild")
 	}
-	
-	// Capture snapshot before making changes (for diff calculation)
-	var oldSnapshot *GraphSnapshot
-	var snapshotCaptured bool
-	if versionStore, ok := s.store.(VersionStore); ok {
-		snap, err := CaptureGraphSnapshot(ctx, versionStore)
-		if err != nil {
-			logger.Warn("Failed to capture graph snapshot for diff tracking; will skip diff generation for this run", "error", err)
-			// Non-fatal - continue without diff calculation for this cycle
-		} else {
-			oldSnapshot = snap
-			snapshotCaptured = true
-		}
-	}
-	
-	defer func() {
-		duration := time.Since(startTime)
-		logger.InfoContext(ctx, "Graph precalculation completed", "duration", duration, "incremental", incrementalMode)
-		span.SetAttributes(attribute.String("total_duration", duration.String()))
-		
-		// Update precalc state
-		durationMs := int32(duration.Milliseconds())
-		var fullPrecalcTime sql.NullTime
-		if !incrementalMode {
-			fullPrecalcTime = sql.NullTime{Time: time.Now(), Valid: true}
-		}
-		if err := s.store.UpdatePrecalcState(ctx, db.UpdatePrecalcStateParams{
-			LastPrecalcAt:     sql.NullTime{Time: time.Now(), Valid: true},
-			LastFullPrecalcAt: fullPrecalcTime,
-			TotalNodes:        sql.NullInt32{Int32: 0, Valid: false}, // Will be updated later
-			TotalLinks:        sql.NullInt32{Int32: 0, Valid: false}, // Will be updated later
-			PrecalcDurationMs: sql.NullInt32{Int32: durationMs, Valid: true},
-		}); err != nil {
-			logger.Warn("Failed to update precalc state", "error", err)
-		}
-	}()
+
+	// Immutable revisions provide SQL-based, revision-pinned diffs. Do not load
+	// legacy million-node snapshots into the calculation process.
 
 	// Optional clear on start (for full rebuild)
 	if !incrementalMode {
@@ -418,7 +434,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 	// In incremental mode, only fetch changed entities
 	var usersWithActivity []db.ListUsersWithActivityRow
 	var subreddits []db.GetAllSubredditsRow
-	
+
 	if incrementalMode {
 		// Fetch changed users: both users with changed content AND users with profile updates
 		// First get users with changed posts/comments
@@ -428,7 +444,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			precalcErr = fmt.Errorf("failed to fetch users with changed activity: %w", err)
 			return precalcErr
 		}
-		
+
 		// Also get users whose profiles were updated (username changes, etc.)
 		usersFromProfile, err := s.store.GetChangedUsersSince(ctx, lastPrecalcAt)
 		if err != nil {
@@ -436,7 +452,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			precalcErr = fmt.Errorf("failed to fetch users with profile changes: %w", err)
 			return precalcErr
 		}
-		
+
 		// Merge both lists, deduplicating by user ID
 		userMap := make(map[int32]db.ListUsersWithActivityRow)
 		for _, u := range usersFromActivity {
@@ -462,12 +478,12 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 				}
 			}
 		}
-		
+
 		// Convert map to slice
 		for _, u := range userMap {
 			usersWithActivity = append(usersWithActivity, u)
 		}
-		
+
 		changedSubs, err := s.store.GetChangedSubredditsSince(ctx, lastPrecalcAt)
 		if err != nil {
 			span.RecordError(err)
@@ -482,7 +498,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 				Subscribers: sr.Subscribers,
 			})
 		}
-		
+
 		logger.InfoContext(ctx, "Incremental mode: processing only changed entities",
 			"changed_users", len(usersWithActivity),
 			"changed_subreddits", len(subreddits),
@@ -822,39 +838,60 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 		flushLinks(true)
 	}
 
-	// Subreddit relationships -> links
-	relationships, err := s.store.GetAllSubredditRelationships(ctx)
-	if err != nil {
-		precalcErr = fmt.Errorf("failed to fetch relationships: %w", err)
-		return precalcErr
-	}
-	relLinks := 0
-	for _, rel := range relationships {
-		pendingLinks = append(pendingLinks, db.BulkInsertGraphLinkParams{Source: fmt.Sprintf("subreddit_%d", rel.SourceSubredditID), Target: fmt.Sprintf("subreddit_%d", rel.TargetSubredditID)})
-		relLinks++
-		if len(pendingLinks)%5000 == 0 {
-			flushLinks(false)
+	// Base topology already exists in normalized aggregate tables. Insert it in
+	// one set-based statement instead of copying millions of rows through Go.
+	if q, ok := s.store.(*db.Queries); ok {
+		workspaceLinkCap := positiveEnv("GRAPH_WORKSPACE_LINK_CAP", 200000)
+		result, err := q.DB().ExecContext(ctx, `
+INSERT INTO graph_links(source,target)
+	SELECT source,target FROM (
+	SELECT source,target,weight FROM (
+	  SELECT 'subreddit_'||r.source_subreddit_id source,
+	         'subreddit_'||r.target_subreddit_id target,r.overlap_count weight
+	  FROM subreddit_relationships r
+	  JOIN graph_nodes s ON s.id='subreddit_'||r.source_subreddit_id
+	  JOIN graph_nodes t ON t.id='subreddit_'||r.target_subreddit_id
+	  WHERE r.source_subreddit_id<r.target_subreddit_id
+	  ORDER BY r.overlap_count DESC,r.source_subreddit_id,r.target_subreddit_id
+	  LIMIT $1
+	) overlap
+	UNION ALL
+	SELECT source,target,weight FROM (
+	  SELECT 'user_'||a.user_id source,'subreddit_'||a.subreddit_id target,a.activity_count weight
+	  FROM user_subreddit_activity a
+	  JOIN graph_nodes u ON u.id='user_'||a.user_id
+	  JOIN graph_nodes s ON s.id='subreddit_'||a.subreddit_id
+	  ORDER BY a.activity_count DESC,a.user_id,a.subreddit_id
+	  LIMIT $1
+	) activity
+	) candidates
+	ORDER BY weight DESC,source,target
+	LIMIT $1
+ON CONFLICT(source,target) DO NOTHING`, workspaceLinkCap)
+		if err != nil {
+			precalcErr = fmt.Errorf("set-based graph link materialization: %w", err)
+			return precalcErr
 		}
-	}
-	flushLinks(true)
-	log.Printf("✅ Queued %d subreddit relationship links", relLinks)
-
-	// User activity -> links (idempotent)
-	acts, err := s.store.GetAllUserSubredditActivity(ctx)
-	if err != nil {
-		precalcErr = fmt.Errorf("failed to fetch activities: %w", err)
-		return precalcErr
-	}
-	actLinks := 0
-	for _, a := range acts {
-		pendingLinks = append(pendingLinks, db.BulkInsertGraphLinkParams{Source: fmt.Sprintf("user_%d", a.UserID), Target: fmt.Sprintf("subreddit_%d", a.SubredditID)})
-		actLinks++
-		if len(pendingLinks)%10000 == 0 {
-			flushLinks(false)
+		count, _ := result.RowsAffected()
+		log.Printf("✅ Materialized %d base graph links with set-based SQL", count)
+	} else {
+		// Alternate-store fallback retained for unit tests.
+		relationships, err := s.store.GetAllSubredditRelationships(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch relationships: %w", err)
 		}
+		for _, rel := range relationships {
+			pendingLinks = append(pendingLinks, db.BulkInsertGraphLinkParams{Source: fmt.Sprintf("subreddit_%d", rel.SourceSubredditID), Target: fmt.Sprintf("subreddit_%d", rel.TargetSubredditID)})
+		}
+		acts, err := s.store.GetAllUserSubredditActivity(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch activities: %w", err)
+		}
+		for _, a := range acts {
+			pendingLinks = append(pendingLinks, db.BulkInsertGraphLinkParams{Source: fmt.Sprintf("user_%d", a.UserID), Target: fmt.Sprintf("subreddit_%d", a.SubredditID)})
+		}
+		flushLinks(true)
 	}
-	flushLinks(true)
-	log.Printf("✅ Queued %d user activity links", actLinks)
 
 	if detailed {
 		upost := 0
@@ -880,12 +917,27 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 
 	log.Printf("🎉 Graph data precalculation completed successfully")
 
-	// Run hierarchical community detection and store results
+	// Layout is authoritative input for hierarchy centroids, bundles, and the
+	// spatial index. A failed or planar layout must stop publication.
+	if err := s.computeAndStoreLayout(ctx); err != nil {
+		return fmt.Errorf("layout computation: %w", err)
+	}
+
+	// One deterministic hierarchy is the source for overview communities, LOD,
+	// and bundles; there is no independently-computed flat partition.
 	if queries, ok := s.store.(*db.Queries); ok {
 		// Fetch nodes and links for community detection
-		nodes, err := queries.ListGraphNodesByWeight(ctx, 50000)
+		// Detailed crawls may retain millions of comment nodes and tens of
+		// millions of links.  Hierarchy is an explorer LOD artifact, not an
+		// unbounded in-memory analytics job.
+		communityNodeCap := positiveEnv("GRAPH_COMMUNITY_MAX_NODES", 10000)
+		communityLinkCap := positiveEnv("GRAPH_COMMUNITY_MAX_LINKS", 50000)
+		if communityNodeCap > math.MaxInt32 {
+			communityNodeCap = math.MaxInt32
+		}
+		nodes, err := queries.ListGraphNodesByWeight(ctx, int32(communityNodeCap))
 		if err != nil {
-			log.Printf("⚠️ failed to fetch nodes for community detection: %v", err)
+			return fmt.Errorf("fetch nodes for community detection: %w", err)
 		} else if len(nodes) == 0 {
 			log.Printf("ℹ️ No nodes found for community detection")
 		} else {
@@ -893,28 +945,36 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			for i, n := range nodes {
 				nodeIDs[i] = n.ID
 			}
-			links, err := queries.ListGraphLinksAmong(ctx, nodeIDs)
+			links, err := listGraphLinksAmongCapped(ctx, queries, nodeIDs, communityLinkCap)
 			if err != nil {
-				log.Printf("⚠️ failed to fetch links for community detection: %v", err)
+				return fmt.Errorf("fetch links for community detection: %w", err)
 			} else {
-				// Run hierarchical community detection
 				hierarchy, err := s.detectHierarchicalCommunities(ctx, queries, nodes, links)
 				if err != nil {
-					log.Printf("⚠️ hierarchical community detection failed: %v", err)
-				} else if err := s.storeHierarchy(ctx, queries, hierarchy); err != nil {
-					log.Printf("⚠️ failed to store hierarchy: %v", err)
+					return fmt.Errorf("hierarchical community detection: %w", err)
 				}
-
-				// Also run flat community detection for backward compatibility (reuse same nodes/links)
-				if result, err := s.detectCommunitiesFromData(nodes, links); err != nil {
-					log.Printf("⚠️ community detection failed: %v", err)
-				} else if nodeToCommunity, err := s.storeCommunities(ctx, queries, result, nodes, links); err != nil {
-					log.Printf("⚠️ failed to store communities: %v", err)
-				} else {
-					// Compute and store edge bundles after communities are stored
-					if err := s.computeAndStoreEdgeBundles(ctx, queries, nodeToCommunity, nodes, links); err != nil {
-						log.Printf("⚠️ failed to compute edge bundles: %v", err)
+				sqlDB, ok := queries.DB().(*sql.DB)
+				if !ok {
+					return errors.New("community persistence requires transactional database")
+				}
+				tx, err := sqlDB.BeginTx(ctx, nil)
+				if err != nil {
+					return fmt.Errorf("begin community publication: %w", err)
+				}
+				txQueries := db.New(tx)
+				if err = s.storeHierarchy(ctx, txQueries, hierarchy); err == nil {
+					var nodeToCommunity map[string]int32
+					nodeToCommunity, err = s.storeCommunities(ctx, txQueries, communitiesFromHierarchy(hierarchy), nodes, links)
+					if err == nil {
+						err = s.computeAndStoreEdgeBundles(ctx, txQueries, nodeToCommunity, nodes, links)
 					}
+				}
+				if err != nil {
+					_ = tx.Rollback()
+					return fmt.Errorf("persist community hierarchy: %w", err)
+				}
+				if err = tx.Commit(); err != nil {
+					return fmt.Errorf("commit community hierarchy: %w", err)
 				}
 			}
 		}
@@ -922,11 +982,6 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 		log.Printf("ℹ️ community detection skipped: store is not *db.Queries")
 	}
 
-	// Optional: compute and store a simple 2D layout for faster client rendering
-	if err := s.computeAndStoreLayout(ctx); err != nil {
-		log.Printf("⚠️ layout computation failed: %v", err)
-	}
-	
 	// Count final nodes and links for state tracking
 	var totalNodes, totalLinks int32
 	if queries, ok := s.store.(*db.Queries); ok {
@@ -940,7 +995,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 			}
 		}
 	}
-	
+
 	// Update precalc state on success. Use startTime as the cutoff to avoid missing
 	// updates that occur during the run.
 	duration := time.Since(startTime)
@@ -958,7 +1013,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 	}); err != nil {
 		logger.Warn("Failed to update precalc state", "error", err)
 	}
-	
+
 	// Track version and calculate diffs
 	if versionStore, ok := s.store.(VersionStore); ok {
 		// Create a new version record
@@ -966,31 +1021,14 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 		if err != nil {
 			logger.Warn("Failed to create graph version", "error", err)
 		} else {
-			// Only calculate diffs if we successfully captured the old snapshot
-			if snapshotCaptured {
-				// Capture new snapshot and calculate diffs
-				newSnapshot, err := CaptureGraphSnapshot(ctx, versionStore)
-				if err != nil {
-					logger.Warn("Failed to capture new graph snapshot", "error", err)
-				} else {
-					// Calculate and store diffs
-					if err := CalculateAndStoreDiffs(ctx, versionStore, versionID, oldSnapshot, newSnapshot); err != nil {
-						logger.Warn("Failed to calculate and store diffs", "error", err)
-					} else {
-						logger.InfoContext(ctx, "Graph version and diffs stored successfully", "version_id", versionID)
-					}
-				}
-			} else {
-				logger.InfoContext(ctx, "Skipping diff calculation (snapshot not captured)", "version_id", versionID)
-			}
-			
+			logger.InfoContext(ctx, "Graph version metadata stored; immutable revision routes provide diffs", "version_id", versionID)
 			// Clean up old versions
 			if err := CleanupOldVersions(ctx, versionStore); err != nil {
 				logger.Warn("Failed to cleanup old versions", "error", err)
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -1024,9 +1062,9 @@ func (s *Service) checkPositionColumnsExist(ctx context.Context, queries *db.Que
 	return true
 }
 
-// computeAndStoreLayout calculates a simple force-directed 2D layout for a capped set of nodes
-// and persists positions into graph_nodes.pos_x/pos_y (pos_z set to 0). It is best-effort and
-// bounded to avoid heavy CPU load.
+// computeAndStoreLayout calculates a deterministic three-axis force layout for
+// a capped build workspace. Existing coordinates warm-start subsequent runs;
+// new nodes receive revision-independent spherical seeds.
 func (s *Service) computeAndStoreLayout(ctx context.Context) error {
 	layoutStart := time.Now()
 
@@ -1087,17 +1125,30 @@ func (s *Service) computeAndStoreLayout(ctx context.Context) error {
 		idx[n.ID] = i
 	}
 
-	// Initialize positions in a circle to reduce initial clashes
+	// Warm-start existing positions. Deterministic spherical seeds prevent new
+	// objects from collapsing into a visual plane.
 	N := len(nodes)
 	X := make([]float64, N)
 	Y := make([]float64, N)
 	Z := make([]float64, N)
 	R := 200.0 * math.Sqrt(float64(N)/1000.0+1)
-	for i := 0; i < N; i++ {
-		a := 2 * math.Pi * float64(i) / float64(N)
-		X[i] = R * math.Cos(a)
-		Y[i] = R * math.Sin(a)
-		Z[i] = 0
+	for i, node := range nodes {
+		if node.PosX.Valid && node.PosY.Valid && node.PosZ.Valid && isFinite3D(node.PosX.Float64, node.PosY.Float64, node.PosZ.Float64) {
+			X[i], Y[i], Z[i] = node.PosX.Float64, node.PosY.Float64, node.PosZ.Float64
+			continue
+		}
+		X[i], Y[i], Z[i] = deterministicSphericalSeed(node.ID, R)
+	}
+	if N > 1 {
+		minZ, maxZ := Z[0], Z[0]
+		for _, value := range Z[1:] {
+			minZ, maxZ = math.Min(minZ, value), math.Max(maxZ, value)
+		}
+		if math.Abs(maxZ-minZ) < 1e-6 {
+			for i, node := range nodes {
+				_, _, Z[i] = deterministicSphericalSeed(node.ID, R)
+			}
+		}
 	}
 	// Build adjacency
 	type edge struct{ a, b int }
@@ -1128,49 +1179,59 @@ func (s *Service) computeAndStoreLayout(ctx context.Context) error {
 	cool := R / float64(iterations)
 	dispX := make([]float64, N)
 	dispY := make([]float64, N)
-	repX := make([]float64, N) // Reusable buffer for Barnes-Hut forces
+	dispZ := make([]float64, N)
+	repX := make([]float64, N) // Reusable buffers for octree forces
 	repY := make([]float64, N)
+	repZ := make([]float64, N)
 	var attr = func(dist float64) float64 { return (dist * dist) / k }
 
 	layoutComputeStart := time.Now()
 	for it := 0; it < iterations; it++ {
 		for i := 0; i < N; i++ {
-			dispX[i], dispY[i] = 0, 0
+			dispX[i], dispY[i], dispZ[i] = 0, 0, 0
 		}
 
-		// Use Barnes-Hut for O(n log n) repulsive forces (writes into repX, repY)
+		// Three-dimensional Barnes-Hut octree repulsion is O(n log n).
 		repStrength := k * k
-		calculateBarnesHutForces(X, Y, repX, repY, theta, repStrength)
+		calculateOctree3DForces(X, Y, Z, repX, repY, repZ, theta, repStrength)
 		for i := 0; i < N; i++ {
 			dispX[i] += repX[i]
 			dispY[i] += repY[i]
+			dispZ[i] += repZ[i]
 		}
 
 		// Attractive forces along edges (still O(E))
 		for _, e := range E {
 			dx := X[e.a] - X[e.b]
 			dy := Y[e.a] - Y[e.b]
-			dist := math.Hypot(dx, dy)
+			dz := Z[e.a] - Z[e.b]
+			dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
 			if dist < 1e-6 {
-				dx, dy, dist = (randFloat() - 0.5), (randFloat() - 0.5), 1
+				dx, dy, dz = deterministicDirection3D(e.a, e.b)
+				dist = 1e-6
 			}
 			force := attr(dist)
 			ax := dx / dist * force
 			ay := dy / dist * force
+			az := dz / dist * force
 			dispX[e.a] -= ax
 			dispY[e.a] -= ay
+			dispZ[e.a] -= az
 			dispX[e.b] += ax
 			dispY[e.b] += ay
+			dispZ[e.b] += az
 		}
 		// limit max displacement (temperature)
 		temp := R - float64(it)*cool
 		for v := 0; v < N; v++ {
 			dx := dispX[v]
 			dy := dispY[v]
-			disp := math.Hypot(dx, dy)
+			dz := dispZ[v]
+			disp := math.Sqrt(dx*dx + dy*dy + dz*dz)
 			if disp > 0 {
 				X[v] += dx / disp * math.Min(disp, temp)
 				Y[v] += dy / disp * math.Min(disp, temp)
+				Z[v] += dz / disp * math.Min(disp, temp)
 			}
 			// prevent blow-up
 			if X[v] > 1e6 {
@@ -1182,6 +1243,11 @@ func (s *Service) computeAndStoreLayout(ctx context.Context) error {
 				Y[v] = 1e6
 			} else if Y[v] < -1e6 {
 				Y[v] = -1e6
+			}
+			if Z[v] > 1e6 {
+				Z[v] = 1e6
+			} else if Z[v] < -1e6 {
+				Z[v] = -1e6
 			}
 		}
 	}
@@ -1200,6 +1266,23 @@ func (s *Service) computeAndStoreLayout(ctx context.Context) error {
 	log.Printf("🗺️ layout complete: %d/%d positions updated in %s (total: %s)", updated, len(ids), updateDuration.Truncate(time.Millisecond), totalDuration.Truncate(time.Millisecond))
 
 	return nil
+}
+
+func deterministicSphericalSeed(id string, radius float64) (float64, float64, float64) {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(id))
+	hash := hasher.Sum64()
+	u := float64(hash&0xffffffff) / float64(uint64(1)<<32)
+	v := float64(hash>>32) / float64(uint64(1)<<32)
+	z := 2*u - 1
+	angle := 2 * math.Pi * v
+	localRadius := radius * (0.5 + 0.5*float64((hash>>16)&0xffff)/65535)
+	xy := math.Sqrt(math.Max(0, 1-z*z))
+	return localRadius * xy * math.Cos(angle), localRadius * xy * math.Sin(angle), localRadius * z
+}
+
+func isFinite3D(x, y, z float64) bool {
+	return !math.IsNaN(x) && !math.IsNaN(y) && !math.IsNaN(z) && !math.IsInf(x, 0) && !math.IsInf(y, 0) && !math.IsInf(z, 0)
 }
 
 func max(a, b int) int {
