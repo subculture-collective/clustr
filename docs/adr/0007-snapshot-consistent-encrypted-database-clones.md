@@ -28,6 +28,8 @@ Clustr uses a logical clone pipeline with the following deep Module boundary:
 - Kvant restores into a new clone identity, digest-pinned PostgreSQL image,
   unique bind-mounted data directory, loopback-only port, and generated clone-only
   credential;
+- the verified clone uses Docker restart policy `unless-stopped`, a PostgreSQL
+  health check, and stable `/mnt/data2` storage so it survives Kvant reboots;
 - verification compares source and clone table counts, migration identity,
   encoding, collation, and extensions before the clone receives `READY`;
 - cleanup is an explicit, separately confirmed operation. A failed export or

@@ -60,10 +60,16 @@ remote_preflight=$(remote_source preflight '' "$source_root" "$source_container"
 source_bytes=$(jq -er '.database_size_bytes' <<<"$remote_preflight")
 incoming_parent=$(dirname "$incoming_root")
 clone_parent=$(dirname "$clone_root")
-[[ -d $incoming_parent && -w $incoming_parent ]] || clone_die "incoming parent is unavailable or not writable: $incoming_parent"
-[[ -d $clone_parent && -w $clone_parent ]] || clone_die "clone parent is unavailable or not writable: $clone_parent"
-clone_require_free_bytes "$incoming_parent" "$source_bytes"
-clone_require_free_bytes "$clone_parent" "$((source_bytes * 2 + source_bytes / 2))"
+incoming_capacity_path=$incoming_parent
+clone_capacity_path=$clone_parent
+[[ ! -d $incoming_root ]] || incoming_capacity_path=$incoming_root
+[[ ! -d $clone_root ]] || clone_capacity_path=$clone_root
+[[ -d $incoming_capacity_path && -w $incoming_capacity_path ]] ||
+  clone_die "incoming storage is unavailable or not writable: $incoming_capacity_path"
+[[ -d $clone_capacity_path && -w $clone_capacity_path ]] ||
+  clone_die "clone storage is unavailable or not writable: $clone_capacity_path"
+clone_require_free_bytes "$incoming_capacity_path" "$source_bytes"
+clone_require_free_bytes "$clone_capacity_path" "$((source_bytes * 2 + source_bytes / 2))"
 if timeout 1 bash -c "</dev/tcp/127.0.0.1/${host_port}" >/dev/null 2>&1; then
   clone_die "configured clone port is already in use: $host_port"
 fi

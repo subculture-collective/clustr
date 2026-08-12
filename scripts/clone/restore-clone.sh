@@ -70,10 +70,17 @@ chmod 600 "$decrypted_archive"
 
 docker run -d \
   --name "$container_name" \
-  --restart no \
+  --restart unless-stopped \
+  --label "io.clustr.role=database-clone" \
+  --label "io.clustr.clone-id=${clone_id}" \
   --cpus "${CLUSTR_CLONE_CPU_LIMIT:-8}" \
   --memory "${CLUSTR_CLONE_MEMORY_LIMIT:-16g}" \
   --memory-swap "${CLUSTR_CLONE_MEMORY_SWAP_LIMIT:-20g}" \
+  --health-cmd "pg_isready -U clustr_clone -d ${database}" \
+  --health-interval 10s \
+  --health-timeout 5s \
+  --health-start-period 20s \
+  --health-retries 6 \
   --publish "127.0.0.1:${host_port}:5432" \
   --env "POSTGRES_USER=clustr_clone" \
   --env "POSTGRES_DB=${database}" \
@@ -96,6 +103,12 @@ docker exec "$container_name" pg_restore \
   >"${clone_dir}/pg_restore.log" 2>&1
 docker exec "$container_name" psql -X -v ON_ERROR_STOP=1 -U clustr_clone -d "$database" -c 'ANALYZE;' \
   >"${clone_dir}/analyze.log" 2>&1
+for _ in $(seq 1 90); do
+  [[ $(docker inspect "$container_name" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}') == healthy ]] && break
+  sleep 1
+done
+[[ $(docker inspect "$container_name" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}') == healthy ]] ||
+  clone_die "restored PostgreSQL container did not become healthy"
 "${script_dir}/verify-clone.sh" "$export_dir" "$container_name" >"${clone_dir}/verification.json"
 rm -f "$decrypted_archive"
 

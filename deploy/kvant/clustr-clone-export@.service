@@ -1,0 +1,31 @@
+[Unit]
+Description=Create and verify persistent Clustr database clone %i on Kvant
+Documentation=file:///opt/clustr/docs/runbooks/production-database-clone.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/clustr/clustr-clone.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=onnwee
+Group=onnwee
+UMask=0077
+ExecStartPre=/opt/clustr/scripts/clone/export-to-kvant.sh /etc/clustr/clustr-clone.env --preflight
+ExecStart=/opt/clustr/scripts/clone/export-to-kvant.sh /etc/clustr/clustr-clone.env --execute %i
+TimeoutStartSec=8h
+TimeoutStopSec=5min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/mnt/data2/clustr-exports /mnt/data2/clustr-clones /etc/clustr/clone-gpg
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

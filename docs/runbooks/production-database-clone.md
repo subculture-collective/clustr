@@ -21,21 +21,21 @@ flowchart LR
 
 ## One-time Kvant setup
 
-1. Copy the repository to its intended immutable checkout on Kvant.
-2. Create a service-user-owned key directory. This key is unattended and
-   encryption-only;
-   protect and back it up separately from the exports:
+1. Install the exact release checkout and systemd template on Kvant. Installation
+   creates durable storage roots, a Kvant-only encryption key, a mode-`0640`
+   environment file, and reloads systemd. It does not start an export:
 
    ```bash
-   sudo install -d -m 0755 /etc/clustr
-   sudo install -d -m 0700 -o onnwee -g onnwee /etc/clustr/clone-gpg
-   sudo -u onnwee /opt/clustr/scripts/clone/init-encryption.sh \
-     /etc/clustr/clone-gpg
+   sudo ./deploy/kvant/install-clone-service.sh "$(pwd)"
+   systemctl cat clustr-clone-export@.service
    ```
 
-3. Copy [clustr-clone.env.example](../../deploy/clone/clustr-clone.env.example)
-   to `/etc/clustr/clustr-clone.env`, set the printed full fingerprint, and use
-   mode `0640`. The file contains no database password or private key.
+2. Back up `/etc/clustr/clone-gpg` separately from database exports. The private
+   key never leaves Kvant. Re-running the installer preserves an existing key
+   and environment file.
+3. Review `/etc/clustr/clustr-clone.env` against
+   [clustr-clone.env.example](../../deploy/clone/clustr-clone.env.example). It
+   contains no database password or private key.
 4. Verify `ssh -o BatchMode=yes almaz true`. Almaz's PostgreSQL remains private;
    the source helper executes through SSH and uses credentials already scoped to
    the database container.
@@ -59,13 +59,13 @@ Preflight must not create the source or destination roots.
 
 ## Execute and monitor
 
-Run from Kvant after explicit production-export approval:
+Run from Kvant after explicit production-export approval. The systemd instance
+keeps the clone operation and its result associated with one immutable clone ID:
 
 ```bash
 clone_id="clustr-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)"
-/opt/clustr/scripts/clone/export-to-kvant.sh \
-  /etc/clustr/clustr-clone.env --execute "$clone_id" \
-  2>&1 | tee "/var/tmp/${clone_id}.log"
+sudo systemctl start "clustr-clone-export@${clone_id}.service"
+sudo journalctl -fu "clustr-clone-export@${clone_id}.service"
 ```
 
 The source Module permits only one export. During `pg_dump`, monitor Almaz's
@@ -77,12 +77,23 @@ Success requires:
 
 - source `READY`, valid checksums, and an encrypted `.dump.gpg` only;
 - Kvant `READY`, no retained plaintext dump, loopback-only PostgreSQL listener,
-  and container restart policy `no`;
+  container health `healthy`, and restart policy `unless-stopped`;
 - `verification.json` status `verified` with exact source/clone counts for
   subreddits, users, posts, and comments plus matching migration, encoding,
   collation, and extensions;
 - the manifest's image is pinned by digest;
 - the source production API/crawler remain healthy.
+
+After a Kvant reboot, Docker restores the verified clone automatically from its
+bind-mounted `/mnt/data2/clustr-clones/<clone-id>/pgdata`. Confirm both the
+container and application contract rather than relying on process state alone:
+
+```bash
+docker inspect "${clone_id}-pg17" \
+  --format 'restart={{.HostConfig.RestartPolicy.Name}} health={{.State.Health.Status}}'
+jq '{status,runtime,expected:.expected.tables,actual:.actual.tables}' \
+  "/mnt/data2/clustr-clones/${clone_id}/verification.json"
+```
 
 ## Resume and failure recovery
 

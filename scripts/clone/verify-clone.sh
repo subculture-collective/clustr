@@ -36,9 +36,23 @@ actual_migration=$(docker exec "$container" sh -c \
   sh "$database")
 actual=$(jq -c --arg migration "$actual_migration" '. + {current_migration:$migration}' <<<"$actual_core")
 expected=$(jq -c '.source_database' "${export_dir}/manifest.json")
+runtime=$(docker inspect "$container" | jq -c '.[0] | {
+  restart_policy: .HostConfig.RestartPolicy.Name,
+  health: .State.Health.Status,
+  clone_role: .Config.Labels["io.clustr.role"],
+  clone_id: .Config.Labels["io.clustr.clone-id"],
+  postgres_bindings: .HostConfig.PortBindings["5432/tcp"]
+}')
 if ! jq -e -n --argjson expected "$expected" --argjson actual "$actual" \
   '$expected.database == $actual.database and $expected.tables == $actual.tables and $expected.current_migration == $actual.current_migration and $expected.encoding == $actual.encoding and $expected.collation == $actual.collation and $expected.extensions == $actual.extensions' >/dev/null; then
   jq -n --argjson expected "$expected" --argjson actual "$actual" '{status:"mismatch",expected:$expected,actual:$actual}' >&2
+  exit 1
+fi
+if ! jq -e -n --argjson runtime "$runtime" --arg expected_clone_id "$(jq -er '.clone_id' "${export_dir}/manifest.json")" \
+  '$runtime.restart_policy == "unless-stopped" and $runtime.health == "healthy" and
+   $runtime.clone_role == "database-clone" and $runtime.clone_id == $expected_clone_id and
+   ($runtime.postgres_bindings | length) == 1 and $runtime.postgres_bindings[0].HostIp == "127.0.0.1"' >/dev/null; then
+  jq -n --argjson runtime "$runtime" '{status:"unsafe-runtime",runtime:$runtime}' >&2
   exit 1
 fi
 jq -n \
@@ -46,4 +60,5 @@ jq -n \
   --arg verified_at "$(date -u +%FT%TZ)" \
   --argjson expected "$expected" \
   --argjson actual "$actual" \
-  '{status:"verified",clone_id:$clone_id,verified_at:$verified_at,expected:$expected,actual:$actual}'
+  --argjson runtime "$runtime" \
+  '{status:"verified",clone_id:$clone_id,verified_at:$verified_at,expected:$expected,actual:$actual,runtime:$runtime}'
