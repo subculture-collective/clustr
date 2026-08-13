@@ -19,7 +19,7 @@ image=$(env_value CLUSTR_PRECALCULATE_IMAGE)
 clone_root=$(env_value KVANT_CLONE_ROOT)
 cpu_limit=$(env_value CLUSTR_WORKER_CPU_LIMIT)
 memory_limit=$(env_value CLUSTR_WORKER_MEMORY_LIMIT)
-: "${clone_root:=/mnt/data2/clustr-clones}" "${cpu_limit:=12}" "${memory_limit:=8g}"
+: "${clone_root:=/mnt/data2/clustr-clones}" "${cpu_limit:=16}" "${memory_limit:=8g}"
 [[ $image =~ ^sha256:[0-9a-f]{64}$ || $image =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || {
   echo "CLUSTR_PRECALCULATE_IMAGE must be pinned by immutable digest or local image ID" >&2
   exit 65

@@ -73,9 +73,10 @@ docker run -d \
   --restart unless-stopped \
   --label "io.clustr.role=database-clone" \
   --label "io.clustr.clone-id=${clone_id}" \
-  --cpus "${CLUSTR_CLONE_CPU_LIMIT:-8}" \
+  --cpus "${CLUSTR_CLONE_CPU_LIMIT:-16}" \
   --memory "${CLUSTR_CLONE_MEMORY_LIMIT:-16g}" \
   --memory-swap "${CLUSTR_CLONE_MEMORY_SWAP_LIMIT:-20g}" \
+  --shm-size "${CLUSTR_CLONE_SHM_SIZE:-1g}" \
   --health-cmd "psql -X -U clustr_clone -d ${database} -Atq -c 'select 1'" \
   --health-interval 10s \
   --health-timeout 5s \

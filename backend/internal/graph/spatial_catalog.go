@@ -14,14 +14,16 @@ import (
 // placement without changing its semantic contents. Every entity at the source
 // watermark is included; these options control PostgreSQL memory and retention.
 type SpatialCatalogOptions struct {
-	Retention int
-	WorkMemMB int
+	Retention       int
+	WorkMemMB       int
+	ParallelWorkers int
 }
 
 func DefaultSpatialCatalogOptions() SpatialCatalogOptions {
 	return SpatialCatalogOptions{
-		Retention: positiveEnv("SPATIAL_CATALOG_RETENTION", 2),
-		WorkMemMB: positiveEnv("SPATIAL_CATALOG_WORK_MEM_MB", 256),
+		Retention:       positiveEnv("SPATIAL_CATALOG_RETENTION", 2),
+		WorkMemMB:       positiveEnv("SPATIAL_CATALOG_WORK_MEM_MB", 256),
+		ParallelWorkers: nonNegativeEnv("SPATIAL_CATALOG_PARALLEL_WORKERS", 0),
 	}
 }
 
@@ -36,16 +38,20 @@ func BuildSpatialCatalogWithOptions(ctx context.Context, database *sql.DB, water
 	if watermark.IsZero() {
 		return 0, fmt.Errorf("spatial catalog source watermark is required")
 	}
-	if options.Retention < 1 || options.WorkMemMB < 1 {
-		return 0, fmt.Errorf("spatial catalog retention and work memory must be positive")
+	if options.Retention < 1 || options.WorkMemMB < 1 || options.ParallelWorkers < 0 {
+		return 0, fmt.Errorf("spatial catalog retention and work memory must be positive and parallel workers non-negative")
 	}
 	if options.WorkMemMB > 2048 {
 		options.WorkMemMB = 2048
 	}
+	if options.ParallelWorkers > 8 {
+		options.ParallelWorkers = 8
+	}
 	config, _ := json.Marshal(map[string]any{
-		"placement":  "anchored-semantic-3d-v1",
-		"projection": "full-corpus-typed-weighted-v1",
-		"labels":     "semantic-label-v1",
+		"placement":        "anchored-semantic-3d-v1",
+		"projection":       "full-corpus-typed-weighted-v1",
+		"labels":           "semantic-label-v1",
+		"parallel_workers": options.ParallelWorkers,
 	})
 	var catalogID int64
 	if err := database.QueryRowContext(ctx, `INSERT INTO spatial_catalogs(status,source_watermark,algorithm_version,config)
@@ -74,11 +80,10 @@ VALUES('staging',$1,'full-corpus-spatial-v1',$2::jsonb) RETURNING id`, watermark
 	if _, err = tx.ExecContext(ctx, `SELECT set_config('work_mem',$1,true)`, fmt.Sprintf("%dMB", options.WorkMemMB)); err != nil {
 		return failTx("work_mem", err)
 	}
-	// Container defaults commonly expose only 64 MiB of /dev/shm. Parallel
-	// aggregate workers multiply dynamic shared-memory demand and can make the
-	// final validation fail after all rows are staged. One worker is predictable
-	// and keeps publication independent of Docker's shm-size setting.
-	if _, err = tx.ExecContext(ctx, `SELECT set_config('max_parallel_workers_per_gather','0',true)`); err != nil {
+	// The safe default is zero because Docker commonly exposes only 64 MiB of
+	// /dev/shm. Dedicated workers with an explicitly enlarged shared-memory mount
+	// may opt into parallel plans without weakening that portable default.
+	if _, err = tx.ExecContext(ctx, `SELECT set_config('max_parallel_workers_per_gather',$1,true)`, fmt.Sprintf("%d", options.ParallelWorkers)); err != nil {
 		return failTx("parallelism", err)
 	}
 
@@ -225,20 +230,20 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2`, catalogID, wat
 		{"user_activity_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
 SELECT $1,'user_'||a.user_id,'subreddit_'||a.subreddit_id,'user_activity',true,a.activity_count
 FROM user_subreddit_activity a
-JOIN spatial_catalog_entities source ON source.catalog_id=$1 AND source.id='user_'||a.user_id
-JOIN spatial_catalog_entities target ON target.catalog_id=$1 AND target.id='subreddit_'||a.subreddit_id
+JOIN users u ON u.id=a.user_id AND COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2
+JOIN subreddits s ON s.id=a.subreddit_id AND COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2
 WHERE a.activity_count>0`},
 		{"subreddit_overlap_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
 SELECT $1,'subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id),
  'subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id),'subreddit_overlap',false,max(r.overlap_count)::bigint
 FROM subreddit_relationships r
-JOIN spatial_catalog_entities source ON source.catalog_id=$1 AND source.id='subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id)
-JOIN spatial_catalog_entities target ON target.catalog_id=$1 AND target.id='subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id)
+JOIN subreddits source ON source.id=r.source_subreddit_id AND COALESCE(source.updated_at,source.created_at,to_timestamp(0)) <= $2
+JOIN subreddits target ON target.id=r.target_subreddit_id AND COALESCE(target.updated_at,target.created_at,to_timestamp(0)) <= $2
 WHERE r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
 GROUP BY LEAST(r.source_subreddit_id,r.target_subreddit_id),GREATEST(r.source_subreddit_id,r.target_subreddit_id)`},
 	}
 	for _, statement := range linkStatements {
-		if _, err = tx.ExecContext(ctx, statement.query, catalogID); err != nil {
+		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
 			return failTx(statement.stage, err)
 		}
 		logger.InfoContext(ctx, "Spatial relationship stage complete", "catalog_id", catalogID, "stage", statement.stage)
