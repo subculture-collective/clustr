@@ -59,8 +59,8 @@ func BuildSpatialCatalogWithOptions(ctx context.Context, database *sql.DB, water
 	if options.WorkMemMB > 2048 {
 		options.WorkMemMB = 2048
 	}
-	if options.ParallelWorkers > 8 {
-		options.ParallelWorkers = 8
+	if options.ParallelWorkers > 12 {
+		options.ParallelWorkers = 12
 	}
 	config, _ := json.Marshal(map[string]any{
 		"placement":        "anchored-semantic-3d-v1",

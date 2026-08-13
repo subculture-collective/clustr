@@ -133,7 +133,7 @@ and memory. The database credential is composed from the protected clone
 password through an ephemeral file descriptor rather than stored in another
 environment file.
 On Kvant, the supported calculation profile gives PostgreSQL 16 CPUs and a
-1 GiB shared-memory mount, and sets `SPATIAL_CATALOG_PARALLEL_WORKERS=4` for
+an enlarged shared-memory mount, and sets `SPATIAL_CATALOG_PARALLEL_WORKERS=12` for
 large catalog queries. Keep the application default at zero on hosts that have
 not explicitly enlarged the database container's `/dev/shm`.
 After a catalog-only failure, an operator may use `--publish-existing` to reuse
