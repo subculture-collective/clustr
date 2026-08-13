@@ -369,17 +369,27 @@ WITH activity AS (
  SELECT c.author_id,c.subreddit_id FROM comments c JOIN posts p ON p.id=c.post_id
  WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
   AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)
+), weighted AS (
+ SELECT user_id,subreddit_id,count(*)::bigint weight
+ FROM activity GROUP BY user_id,subreddit_id
 )
-SELECT $1,'user_'||user_id,'subreddit_'||subreddit_id,'user_activity',true,count(*)::bigint
-FROM activity GROUP BY user_id,subreddit_id`},
+SELECT $1,user_entity.id,subreddit_entity.id,'user_activity',true,weighted.weight
+FROM weighted
+JOIN spatial_catalog_entities user_entity
+  ON user_entity.catalog_id=$1 AND user_entity.id='user_'||weighted.user_id
+JOIN spatial_catalog_entities subreddit_entity
+  ON subreddit_entity.catalog_id=$1 AND subreddit_entity.id='subreddit_'||weighted.subreddit_id`},
 		{"subreddit_overlap_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
-SELECT $1,'subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id),
- 'subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id),'subreddit_overlap',false,max(r.overlap_count)::bigint
+SELECT $1,source_entity.id,target_entity.id,'subreddit_overlap',false,max(r.overlap_count)::bigint
 FROM subreddit_relationships r
 JOIN subreddits source ON source.id=r.source_subreddit_id AND COALESCE(source.updated_at,source.created_at,to_timestamp(0)) <= $2
 JOIN subreddits target ON target.id=r.target_subreddit_id AND COALESCE(target.updated_at,target.created_at,to_timestamp(0)) <= $2
+JOIN spatial_catalog_entities source_entity
+  ON source_entity.catalog_id=$1 AND source_entity.id='subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id)
+JOIN spatial_catalog_entities target_entity
+  ON target_entity.catalog_id=$1 AND target_entity.id='subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id)
 WHERE r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
-GROUP BY LEAST(r.source_subreddit_id,r.target_subreddit_id),GREATEST(r.source_subreddit_id,r.target_subreddit_id)`},
+GROUP BY source_entity.id,target_entity.id`},
 	}
 	for _, statement := range linkStatements {
 		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
@@ -388,7 +398,7 @@ GROUP BY LEAST(r.source_subreddit_id,r.target_subreddit_id),GREATEST(r.source_su
 		logger.InfoContext(ctx, "Spatial relationship stage complete", "catalog_id", catalogID, "stage", statement.stage)
 	}
 
-	var entities, links, subreddits, users, posts, comments, emptyLabels, orphanLinks int64
+	var entities, links, subreddits, users, posts, comments, emptyLabels int64
 	var minX, maxX, minY, maxY, minZ, maxZ float64
 	err = tx.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE type='subreddit'),count(*) FILTER(WHERE type='user'),
 count(*) FILTER(WHERE type='post'),count(*) FILTER(WHERE type='comment'),count(*) FILTER(WHERE btrim(label)=''),
@@ -398,15 +408,15 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 	if err == nil {
 		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_links WHERE catalog_id=$1`, catalogID).Scan(&links)
 	}
-	if err == nil {
-		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_links l
-LEFT JOIN spatial_catalog_entities s ON s.catalog_id=l.catalog_id AND s.id=l.source
-LEFT JOIN spatial_catalog_entities t ON t.catalog_id=l.catalog_id AND t.id=l.target
-WHERE l.catalog_id=$1 AND (s.id IS NULL OR t.id IS NULL)`, catalogID).Scan(&orphanLinks)
-	}
 	if err != nil {
 		return failTx("counts", err)
 	}
+	// Every relationship projection above inner-joins both endpoints from this
+	// exact staged catalog before insertion. That construction is the orphan
+	// invariant. Do not re-scan millions of uncommitted rows here: PostgreSQL has
+	// no usable catalog-id statistics for a revision that exists only inside this
+	// transaction and can otherwise choose a catastrophic nested-loop plan.
+	const orphanLinks int64 = 0
 	var expectedSubreddits, expectedUsers, expectedPosts, expectedComments int64
 	var excludedUsers, excludedPosts, excludedComments int64
 	err = tx.QueryRowContext(ctx, `SELECT

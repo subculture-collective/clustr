@@ -103,6 +103,19 @@ WHERE catalog_id=$1 AND (
 	if semanticLinks != 2 {
 		t.Fatalf("materialized cross-cutting links=%d, want 2", semanticLinks)
 	}
+	var orphanLinks int
+	if err := database.QueryRowContext(ctx, `SELECT count(*)
+FROM spatial_catalog_links link
+LEFT JOIN spatial_catalog_entities source
+  ON source.catalog_id=link.catalog_id AND source.id=link.source
+LEFT JOIN spatial_catalog_entities target
+  ON target.catalog_id=link.catalog_id AND target.id=link.target
+WHERE link.catalog_id=$1 AND (source.id IS NULL OR target.id IS NULL)`, first).Scan(&orphanLinks); err != nil {
+		t.Fatal(err)
+	}
+	if orphanLinks != 0 {
+		t.Fatalf("endpoint-constrained projection produced %d orphan links", orphanLinks)
+	}
 
 	second, err := BuildSpatialCatalogWithOptions(ctx, database, watermark.Add(time.Second), SpatialCatalogOptions{Retention: 1, WorkMemMB: 16})
 	if err != nil {
