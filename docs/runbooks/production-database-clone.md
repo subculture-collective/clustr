@@ -126,6 +126,13 @@ file to construct `DATABASE_URL` without printing it. Apply migrations to the
 clone, run the full catalog/revision calculation, and retain calculation evidence
 under the clone identity. Never point production readers at the clone.
 
+The installed `clustr-clone-calculate@<clone-id>.service` owns this rehearsal.
+It validates clone identity, health, loopback binding, and the pinned worker
+image before starting the full catalog/revision calculation with bounded CPU
+and memory. The database credential is composed from the protected clone
+password through an ephemeral file descriptor rather than stored in another
+environment file.
+
 ## Retention and explicit cleanup
 
 Keep the encrypted source and incoming exports until clone verification and the

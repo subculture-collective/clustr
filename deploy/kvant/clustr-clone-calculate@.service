@@ -1,0 +1,31 @@
+[Unit]
+Description=Build and verify full Clustr spatial publication on clone %i
+Documentation=file:///opt/clustr/docs/runbooks/almaz-kvant-launch.md
+After=docker.service clustr-clone-export@%i.service
+Requires=docker.service
+ConditionPathExists=/etc/clustr/clone-calculation.env
+ConditionPathExists=/mnt/data2/clustr-clones/%i/READY
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=onnwee
+Group=onnwee
+UMask=0077
+EnvironmentFile=/etc/clustr/clone-calculation.env
+ExecStart=/opt/clustr/deploy/kvant/run-clone-calculation.sh /etc/clustr/clone-calculation.env %i
+TimeoutStartSec=2h
+TimeoutStopSec=5min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/user/1000
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

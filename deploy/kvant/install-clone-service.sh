@@ -16,13 +16,16 @@ getent passwd onnwee >/dev/null || {
   exit 65
 }
 
-install -d -m 0755 /opt/clustr/scripts/clone /opt/clustr/docs/runbooks /opt/clustr/deploy/clone
+install -d -m 0755 /opt/clustr/scripts/clone /opt/clustr/docs/runbooks /opt/clustr/deploy/clone /opt/clustr/deploy/kvant
 install -d -m 0750 -o onnwee -g onnwee /mnt/data2/clustr-exports /mnt/data2/clustr-clones
 install -d -m 0755 /etc/clustr
 install -m 0755 "${repo_root}"/scripts/clone/*.sh /opt/clustr/scripts/clone/
 install -m 0644 "${repo_root}/docs/runbooks/production-database-clone.md" /opt/clustr/docs/runbooks/
 install -m 0644 "${repo_root}/deploy/clone/clustr-clone.env.example" /opt/clustr/deploy/clone/
 install -m 0644 "${repo_root}/deploy/kvant/clustr-clone-export@.service" /etc/systemd/system/
+install -m 0755 "${repo_root}/deploy/kvant/run-clone-calculation.sh" /opt/clustr/deploy/kvant/
+install -m 0644 "${repo_root}/deploy/kvant/clustr-clone-calculate@.service" /etc/systemd/system/
+install -m 0644 "${repo_root}/deploy/kvant/clone-calculation.env.example" /opt/clustr/deploy/kvant/
 
 install -m 0640 -o root -g onnwee \
   "${repo_root}/deploy/clone/clustr-clone.env.example" /etc/clustr/clustr-clone.env.example
@@ -48,7 +51,11 @@ if [[ ! -e /etc/clustr/clustr-clone.env ]]; then
     "${repo_root}/deploy/clone/clustr-clone.env.example" >"$rendered_env"
   install -m 0640 -o root -g onnwee "$rendered_env" /etc/clustr/clustr-clone.env
 fi
+if [[ ! -e /etc/clustr/clone-calculation.env ]]; then
+  install -m 0640 -o root -g onnwee \
+    "${repo_root}/deploy/kvant/clone-calculation.env.example" /etc/clustr/clone-calculation.env.example
+fi
 
 systemctl daemon-reload
-echo "installed clustr-clone-export@.service; no export was started"
+echo "installed Clustr clone export/calculation services; no job was started"
 echo "Kvant clone encryption fingerprint: $fingerprint"
