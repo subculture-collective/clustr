@@ -498,9 +498,13 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
 	key := "revision_id"
 	artifactID := payload.RevisionID
 	if payload.SpatialCatalog != 0 {
-		rows, err := h.db.QueryContext(ctx, `WITH materialized AS (
- SELECT source,target,relation,directed,weight FROM spatial_catalog_links
- WHERE catalog_id=$1 AND source=ANY($2) AND target=ANY($2)
+		rows, err := h.db.QueryContext(ctx, `WITH visible AS MATERIALIZED (
+ SELECT unnest($2::text[]) id
+), materialized AS (
+ SELECT link.source,link.target,link.relation,link.directed,link.weight
+ FROM visible source
+ JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=source.id
+ JOIN visible target ON target.id=link.target
 ), structural AS (
  SELECT author_id source,id target,'authorship' relation,true directed,1::bigint weight
  FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND author_id=ANY($2)
