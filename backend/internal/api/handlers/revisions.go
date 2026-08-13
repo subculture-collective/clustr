@@ -40,9 +40,43 @@ type revisionLink struct {
 type scenePayload struct {
 	RevisionID     int64          `json:"revision_id"`
 	SpatialCatalog int64          `json:"spatial_catalog_id,omitempty"`
+	Scope          string         `json:"scope,omitempty"`
+	RootID         string         `json:"root_id,omitempty"`
+	Truncated      bool           `json:"truncated,omitempty"`
 	Nodes          []revisionNode `json:"nodes"`
 	Links          []revisionLink `json:"links"`
 	NextCursor     string         `json:"next_cursor,omitempty"`
+}
+
+type entityExpansion struct {
+	Name     string
+	PageSize int
+	MaxTotal int
+	Depth    int
+}
+
+func parseEntityExpansion(r *http.Request) (entityExpansion, error) {
+	name := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("expand")))
+	switch name {
+	case "":
+		return entityExpansion{Name: "neighborhood", PageSize: queryLimit(r, 5000, 25000), MaxTotal: 25000}, nil
+	case "system":
+		return entityExpansion{Name: name, PageSize: queryLimit(r, 512, 512), MaxTotal: 512}, nil
+	case "discussion":
+		return entityExpansion{Name: name, PageSize: queryLimit(r, 512, 512), MaxTotal: 2048}, nil
+	case "thread":
+		depth := 3
+		if raw := r.URL.Query().Get("depth"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > 3 {
+				return entityExpansion{}, errors.New("thread depth must be between 1 and 3")
+			}
+			depth = value
+		}
+		return entityExpansion{Name: name, PageSize: queryLimit(r, 250, 250), MaxTotal: 250, Depth: depth}, nil
+	default:
+		return entityExpansion{}, errors.New("expand must be system, discussion, or thread")
+	}
 }
 
 func NewRevisionHandler(d revisionDB) *RevisionHandler { return &RevisionHandler{db: d} }
@@ -119,7 +153,25 @@ WHERE r.id=$1 AND r.status='published'`, id).Scan(
 		return
 	}
 	out.Bounds = map[string]float64{"min_x": minX, "max_x": maxX, "min_y": minY, "max_y": maxY, "min_z": minZ, "max_z": maxZ}
-	out.Levels = []int{0, 1, 2, 3}
+	levelRows, err := h.db.QueryContext(r.Context(), `SELECT DISTINCT level FROM graph_revision_communities WHERE revision_id=$1 ORDER BY level`, id)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	defer levelRows.Close()
+	out.Levels = []int{}
+	for levelRows.Next() {
+		var level int
+		if err := levelRows.Scan(&level); err != nil {
+			writeRevisionError(w, err)
+			return
+		}
+		out.Levels = append(out.Levels, level)
+	}
+	if err := levelRows.Err(); err != nil {
+		writeRevisionError(w, err)
+		return
+	}
 	out.Formats = []string{"json"}
 	out.SceneContract = "spatial-scene-v1"
 	writeJSON(w, out)
@@ -216,6 +268,15 @@ type regionCursor struct {
 	Offset   int   `json:"offset"`
 }
 
+type entityCursor struct {
+	Revision int64  `json:"revision"`
+	Catalog  int64  `json:"catalog"`
+	RootID   string `json:"root_id"`
+	Expand   string `json:"expand"`
+	Depth    int    `json:"depth"`
+	Offset   int    `json:"offset"`
+}
+
 func decodeRegionCursor(raw string) (regionCursor, error) {
 	if raw == "" {
 		return regionCursor{}, nil
@@ -231,6 +292,26 @@ func decodeRegionCursor(raw string) (regionCursor, error) {
 	return token, nil
 }
 func encodeRegionCursor(token regionCursor) string {
+	body, _ := json.Marshal(token)
+	return base64.RawURLEncoding.EncodeToString(body)
+}
+
+func decodeEntityCursor(raw string) (entityCursor, error) {
+	if raw == "" {
+		return entityCursor{}, nil
+	}
+	body, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return entityCursor{}, errors.New("invalid continuation token")
+	}
+	var token entityCursor
+	if json.Unmarshal(body, &token) != nil || token.Offset < 0 || token.Depth < 0 {
+		return entityCursor{}, errors.New("invalid continuation token")
+	}
+	return token, nil
+}
+
+func encodeEntityCursor(token entityCursor) string {
 	body, _ := json.Marshal(token)
 	return base64.RawURLEncoding.EncodeToString(body)
 }
@@ -621,14 +702,22 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows *sql.Rows
 	if catalog.Valid {
-		rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,value::text,type,x,y,z
-FROM spatial_catalog_entities WHERE catalog_id=$1
-  AND (id=$2 OR (type IN ('subreddit','user','post') AND lower(left(label,128)) LIKE lower($3)||'%' ESCAPE '\'))
-ORDER BY (id=$2) DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix, limit)
+		rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,value::text,type,x,y,z FROM (
+  SELECT id,label,value,type,x,y,z,true AS exact_match
+  FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=$2
+  UNION ALL
+  SELECT id,label,value,type,x,y,z,false AS exact_match
+  FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
+    AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
 	} else {
-		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM graph_revision_nodes
-WHERE revision_id=$1 AND (id=$2 OR lower(left(name,128)) LIKE lower($3)||'%' ESCAPE '\')
-ORDER BY (id=$2) DESC,value DESC,id LIMIT $4`, revisionID, query, prefix, limit)
+		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM (
+  SELECT id,name,value,type,x,y,z,true AS exact_match
+  FROM graph_revision_nodes WHERE revision_id=$1 AND id=$2
+  UNION ALL
+  SELECT id,name,value,type,x,y,z,false AS exact_match
+  FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, revisionID, query, prefix+"%", limit)
 	}
 	if err != nil {
 		writeRevisionError(w, err)
