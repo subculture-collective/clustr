@@ -132,6 +132,10 @@ image before starting the full catalog/revision calculation with bounded CPU
 and memory. The database credential is composed from the protected clone
 password through an ephemeral file descriptor rather than stored in another
 environment file.
+After a catalog-only failure, an operator may use `--publish-existing` to reuse
+an already completed graph workspace. This mode still rebuilds and validates
+the complete catalog and immutable revision; it only avoids repeating source
+projection, hierarchy, and layout.
 
 ## Retention and explicit cleanup
 

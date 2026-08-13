@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 ENV_FILE CLONE_ID" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 ENV_FILE CLONE_ID [--publish-existing]" >&2
   exit 64
 fi
 env_file=$1
 clone_id=$2
+mode=${3:-}
+[[ -z $mode || $mode == --publish-existing ]] || { echo "invalid calculation mode" >&2; exit 64; }
 [[ -r $env_file ]] || { echo "calculation environment is unreadable: $env_file" >&2; exit 66; }
 [[ $clone_id =~ ^clustr-[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,16}$ ]] || { echo "invalid clone id" >&2; exit 65; }
 
@@ -43,6 +45,10 @@ runtime_parent=${XDG_RUNTIME_DIR:-/run/user/1000}
 exec 9>"${runtime_parent}/clustr-clone-calculation.lock"
 flock -n 9 || { echo "another clone calculation is running" >&2; exit 75; }
 password=$(<"$password_file")
+worker_args=(--once --full --full-catalog)
+if [[ $mode == --publish-existing ]]; then
+  worker_args=(--once --publish-only --full-catalog)
+fi
 docker run --rm \
   --name "clustr-clone-calculate-${clone_id}" \
   --network host \
@@ -56,4 +62,4 @@ docker run --rm \
   --env-file "$env_file" \
   --env-file <(printf 'DATABASE_URL=postgres://clustr_clone:%s@127.0.0.1:%s/reddit_cluster?sslmode=disable\n' "$password" "$port") \
   "$image" \
-  /app/precalculate --once --full --full-catalog
+  /app/precalculate "${worker_args[@]}"

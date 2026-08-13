@@ -109,12 +109,10 @@ SELECT DISTINCT ON (candidate_id) candidate_id,anchor_id,x,y,z,community_id
 FROM (
   SELECT r.source_subreddit_id candidate_id,t.subreddit_id anchor_id,t.x,t.y,t.z,t.community_id,r.overlap_count weight
   FROM subreddit_relationships r JOIN catalog_resident_subreddits t ON t.subreddit_id=r.target_subreddit_id
-  WHERE r.updated_at <= $1
   UNION ALL
   SELECT r.target_subreddit_id,s.subreddit_id,s.x,s.y,s.z,s.community_id,r.overlap_count weight
   FROM subreddit_relationships r JOIN catalog_resident_subreddits s ON s.subreddit_id=r.source_subreddit_id
-  WHERE r.updated_at <= $1
-) candidates ORDER BY candidate_id,weight DESC,anchor_id`, watermark)
+) candidates ORDER BY candidate_id,weight DESC,anchor_id`)
 	if err != nil {
 		return failTx("related_subreddit_seeds", err)
 	}
@@ -152,8 +150,7 @@ WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, catalogID, wat
 SELECT DISTINCT ON (a.user_id) a.user_id,a.subreddit_id,a.activity_count,s.x,s.y,s.z,s.community_id
 FROM user_subreddit_activity a
 JOIN spatial_catalog_entities s ON s.catalog_id=$1 AND s.id='subreddit_'||a.subreddit_id
-WHERE a.updated_at <= $2
-ORDER BY a.user_id,a.activity_count DESC,a.subreddit_id`, catalogID, watermark)
+ORDER BY a.user_id,a.activity_count DESC,a.subreddit_id`, catalogID)
 	if err != nil {
 		return failTx("user_anchors", err)
 	}
@@ -228,16 +225,20 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2`, catalogID, wat
 		{"user_activity_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
 SELECT $1,'user_'||a.user_id,'subreddit_'||a.subreddit_id,'user_activity',true,a.activity_count
 FROM user_subreddit_activity a
-WHERE a.updated_at <= $2 AND a.activity_count>0`},
+JOIN spatial_catalog_entities source ON source.catalog_id=$1 AND source.id='user_'||a.user_id
+JOIN spatial_catalog_entities target ON target.catalog_id=$1 AND target.id='subreddit_'||a.subreddit_id
+WHERE a.activity_count>0`},
 		{"subreddit_overlap_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
 SELECT $1,'subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id),
  'subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id),'subreddit_overlap',false,max(r.overlap_count)::bigint
 FROM subreddit_relationships r
-WHERE r.updated_at <= $2 AND r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
+JOIN spatial_catalog_entities source ON source.catalog_id=$1 AND source.id='subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id)
+JOIN spatial_catalog_entities target ON target.catalog_id=$1 AND target.id='subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id)
+WHERE r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
 GROUP BY LEAST(r.source_subreddit_id,r.target_subreddit_id),GREATEST(r.source_subreddit_id,r.target_subreddit_id)`},
 	}
 	for _, statement := range linkStatements {
-		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
+		if _, err = tx.ExecContext(ctx, statement.query, catalogID); err != nil {
 			return failTx(statement.stage, err)
 		}
 		logger.InfoContext(ctx, "Spatial relationship stage complete", "catalog_id", catalogID, "stage", statement.stage)

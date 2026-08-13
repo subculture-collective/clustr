@@ -41,6 +41,10 @@ func TestIntegration_FullSpatialCatalogCoversLabelsLinksAndWarmStarts(t *testing
 	if _, err := database.ExecContext(ctx, `INSERT INTO comments(id,post_id,author_id,subreddit_id,parent_id,body,score,depth) VALUES($1,$2,$3,$4,'t3_'||$2,'A semantic comment label',7,1)`, commentID, postID, userID, subredditA); err != nil {
 		t.Fatal(err)
 	}
+	// Projection rows are rebuilt after the fixed source watermark. They must be
+	// selected through their watermark-pinned entity endpoints, not their own
+	// later materialization timestamp.
+	watermark := time.Now().UTC()
 	if _, err := database.ExecContext(ctx, `INSERT INTO user_subreddit_activity(user_id,subreddit_id,activity_count) VALUES($1,$2,9)
 ON CONFLICT(user_id,subreddit_id) DO UPDATE SET activity_count=EXCLUDED.activity_count,updated_at=now()`, userID, subredditA); err != nil {
 		t.Fatal(err)
@@ -61,7 +65,6 @@ ON CONFLICT(source_subreddit_id,target_subreddit_id) DO UPDATE SET overlap_count
 		_, _ = database.Exec(`DELETE FROM subreddits WHERE id IN ($1,$2)`, subredditA, subredditB)
 	}()
 
-	watermark := time.Now().UTC().Add(time.Second)
 	first, err := BuildSpatialCatalogWithOptions(ctx, database, watermark, SpatialCatalogOptions{Retention: 1, WorkMemMB: 16})
 	if err != nil {
 		t.Fatal(err)
