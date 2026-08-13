@@ -22,13 +22,20 @@ type revisionDB interface {
 }
 
 type revisionNode struct {
-	ID   string  `json:"id"`
-	Name string  `json:"name"`
-	Val  int64   `json:"val"`
-	Type string  `json:"type"`
-	X    float64 `json:"x"`
-	Y    float64 `json:"y"`
-	Z    float64 `json:"z"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Val                int64           `json:"val"`
+	Type               string          `json:"type"`
+	X                  float64         `json:"x"`
+	Y                  float64         `json:"y"`
+	Z                  float64         `json:"z"`
+	ParentID           string          `json:"parent_id,omitempty"`
+	AnchorID           string          `json:"anchor_id,omitempty"`
+	AuthorID           string          `json:"author_id,omitempty"`
+	CommunityID        string          `json:"community_id,omitempty"`
+	PositionProvenance string          `json:"position_provenance,omitempty"`
+	SourceUpdatedAt    string          `json:"source_updated_at,omitempty"`
+	Metrics            json.RawMessage `json:"metrics,omitempty"`
 }
 type revisionLink struct {
 	Source   string `json:"source"`
@@ -46,6 +53,22 @@ type scenePayload struct {
 	Nodes          []revisionNode `json:"nodes"`
 	Links          []revisionLink `json:"links"`
 	NextCursor     string         `json:"next_cursor,omitempty"`
+}
+
+type rowScanner interface {
+	Scan(...any) error
+}
+
+func scanSpatialNode(scanner rowScanner) (revisionNode, error) {
+	var node revisionNode
+	var metrics []byte
+	err := scanner.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z,
+		&node.ParentID, &node.AnchorID, &node.AuthorID, &node.CommunityID,
+		&node.PositionProvenance, &node.SourceUpdatedAt, &metrics)
+	if len(metrics) > 0 {
+		node.Metrics = append(json.RawMessage(nil), metrics...)
+	}
+	return node, err
 }
 
 type entityExpansion struct {
@@ -116,38 +139,53 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+type manifestPayload struct {
+	RevisionID             int64              `json:"revision_id"`
+	Watermark              string             `json:"source_watermark"`
+	Published              string             `json:"published_at"`
+	Nodes                  int64              `json:"node_count"`
+	ResidentNodes          int64              `json:"resident_node_count"`
+	Links                  int64              `json:"link_count"`
+	ResidentLinks          int64              `json:"resident_link_count"`
+	Communities            int64              `json:"community_count"`
+	CatalogID              int64              `json:"spatial_catalog_id,omitempty"`
+	Layout                 string             `json:"layout_algorithm"`
+	Dimensions             int                `json:"dimensions"`
+	Bounds                 map[string]float64 `json:"bounds"`
+	Levels                 []int              `json:"hierarchy_levels"`
+	Formats                []string           `json:"supported_formats"`
+	SceneContract          string             `json:"scene_contract"`
+	BotPolicyVersion       string             `json:"bot_policy_version,omitempty"`
+	MetricPolicyVersion    string             `json:"metric_policy_version,omitempty"`
+	CatalogChecksum        string             `json:"catalog_checksum,omitempty"`
+	ExcludedUserCount      int64              `json:"excluded_user_count,omitempty"`
+	ExcludedPostCount      int64              `json:"excluded_post_count,omitempty"`
+	ExcludedCommentCount   int64              `json:"excluded_comment_count,omitempty"`
+	NormalizationQuantiles json.RawMessage    `json:"normalization_quantiles,omitempty"`
+}
+
 func (h *RevisionHandler) Manifest(w http.ResponseWriter, r *http.Request) {
 	id, err := h.revision(r)
 	if err != nil {
 		writeRevisionError(w, err)
 		return
 	}
-	var out struct {
-		RevisionID    int64              `json:"revision_id"`
-		Watermark     string             `json:"source_watermark"`
-		Published     string             `json:"published_at"`
-		Nodes         int64              `json:"node_count"`
-		ResidentNodes int64              `json:"resident_node_count"`
-		Links         int64              `json:"link_count"`
-		ResidentLinks int64              `json:"resident_link_count"`
-		Communities   int64              `json:"community_count"`
-		CatalogID     int64              `json:"spatial_catalog_id,omitempty"`
-		Layout        string             `json:"layout_algorithm"`
-		Dimensions    int                `json:"dimensions"`
-		Bounds        map[string]float64 `json:"bounds"`
-		Levels        []int              `json:"hierarchy_levels"`
-		Formats       []string           `json:"supported_formats"`
-		SceneContract string             `json:"scene_contract"`
-	}
+	var out manifestPayload
+	var quantiles []byte
 	var minX, maxX, minY, maxY, minZ, maxZ float64
 	err = h.db.QueryRowContext(r.Context(), `SELECT r.id,r.source_watermark::text,r.published_at::text,
 COALESCE(c.entity_count,r.node_count),r.node_count,COALESCE(c.link_count,r.link_count),r.link_count,r.community_count,
 r.layout_algorithm,r.layout_dimensions,COALESCE(c.min_x,r.min_x),COALESCE(c.max_x,r.max_x),COALESCE(c.min_y,r.min_y),
-COALESCE(c.max_y,r.max_y),COALESCE(c.min_z,r.min_z),COALESCE(c.max_z,r.max_z),COALESCE(c.id,0)
+COALESCE(c.max_y,r.max_y),COALESCE(c.min_z,r.min_z),COALESCE(c.max_z,r.max_z),COALESCE(c.id,0),
+COALESCE(c.bot_policy_version,''),COALESCE(c.metric_policy_version,''),COALESCE(c.catalog_checksum,''),
+COALESCE(c.excluded_user_count,0),COALESCE(c.excluded_post_count,0),COALESCE(c.excluded_comment_count,0),
+COALESCE(c.config->'normalization_quantiles','{}'::jsonb)
 FROM graph_revisions r LEFT JOIN spatial_catalogs c ON c.id=r.spatial_catalog_id AND c.status='published'
 WHERE r.id=$1 AND r.status='published'`, id).Scan(
 		&out.RevisionID, &out.Watermark, &out.Published, &out.Nodes, &out.ResidentNodes, &out.Links, &out.ResidentLinks,
-		&out.Communities, &out.Layout, &out.Dimensions, &minX, &maxX, &minY, &maxY, &minZ, &maxZ, &out.CatalogID)
+		&out.Communities, &out.Layout, &out.Dimensions, &minX, &maxX, &minY, &maxY, &minZ, &maxZ, &out.CatalogID,
+		&out.BotPolicyVersion, &out.MetricPolicyVersion, &out.CatalogChecksum, &out.ExcludedUserCount, &out.ExcludedPostCount,
+		&out.ExcludedCommentCount, &quantiles)
 	if err != nil {
 		writeRevisionError(w, err)
 		return
@@ -174,6 +212,7 @@ WHERE r.id=$1 AND r.status='published'`, id).Scan(
 	}
 	out.Formats = []string{"json"}
 	out.SceneContract = "spatial-scene-v1"
+	out.NormalizationQuantiles = append(json.RawMessage(nil), quantiles...)
 	writeJSON(w, out)
 }
 
@@ -407,7 +446,11 @@ func (h *RevisionHandler) Region(w http.ResponseWriter, r *http.Request) {
 		table = "spatial_catalog_entities"
 		key = "catalog_id"
 	}
-	query := fmt.Sprintf(`SELECT id,%s,value,type,x,y,z FROM %s WHERE %s=$1 AND x BETWEEN $2 AND $5 AND y BETWEEN $3 AND $6 AND z BETWEEN $4 AND $7 AND %s ORDER BY value DESC,id OFFSET $8 LIMIT $9`, map[bool]string{true: "label", false: "name"}[catalog.Valid], table, key, typeFilter)
+	columns := "id,name,value,type,x,y,z"
+	if catalog.Valid {
+		columns = "id,label,value,type,x,y,z,COALESCE(parent_id,''),COALESCE(anchor_id,''),COALESCE(author_id,''),COALESCE(community_id,''),position_provenance,source_updated_at::text,metrics"
+	}
+	query := fmt.Sprintf(`SELECT %s FROM %s WHERE %s=$1 AND x BETWEEN $2 AND $5 AND y BETWEEN $3 AND $6 AND z BETWEEN $4 AND $7 AND %s ORDER BY value DESC,id OFFSET $8 LIMIT $9`, columns, table, key, typeFilter)
 	artifactID := id
 	if catalog.Valid {
 		artifactID = catalog.Int64
@@ -425,7 +468,12 @@ func (h *RevisionHandler) Region(w http.ResponseWriter, r *http.Request) {
 	ids := make([]string, 0, limit)
 	for rows.Next() {
 		var node revisionNode
-		if err := rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z); err != nil {
+		if catalog.Valid {
+			node, err = scanSpatialNode(rows)
+		} else {
+			err = rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z)
+		}
+		if err != nil {
 			writeRevisionError(w, err)
 			return
 		}
@@ -528,7 +576,7 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows *sql.Rows
 	if catalog.Valid {
-		rows, err = h.db.QueryContext(r.Context(), fmt.Sprintf(`SELECT id,label,value,type,x,y,z FROM spatial_catalog_entities
+		rows, err = h.db.QueryContext(r.Context(), fmt.Sprintf(`SELECT id,label,value,type,x,y,z,COALESCE(parent_id,''),COALESCE(anchor_id,''),COALESCE(author_id,''),COALESCE(community_id,''),position_provenance,source_updated_at::text,metrics FROM spatial_catalog_entities
 WHERE catalog_id=$1 AND community_id=$2 AND %s ORDER BY value DESC,id LIMIT $3`, typeFilter), catalog.Int64, cid, limit)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT n.id,n.name,n.value,n.type,n.x,n.y,n.z FROM graph_revision_community_members m JOIN graph_revision_nodes n ON n.revision_id=m.revision_id AND n.id=m.node_id WHERE m.revision_id=$1 AND m.community_id=$2 ORDER BY n.value DESC,n.id LIMIT $3`, id, cid, limit)
@@ -545,7 +593,12 @@ WHERE catalog_id=$1 AND community_id=$2 AND %s ORDER BY value DESC,id LIMIT $3`,
 	ids := []string{}
 	for rows.Next() {
 		var node revisionNode
-		if err := rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z); err != nil {
+		if catalog.Valid {
+			node, err = scanSpatialNode(rows)
+		} else {
+			err = rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z)
+		}
+		if err != nil {
 			writeRevisionError(w, err)
 			return
 		}
@@ -578,9 +631,75 @@ func (h *RevisionHandler) Entity(w http.ResponseWriter, r *http.Request) {
 		writeRevisionError(w, errors.New("entity id is required"))
 		return
 	}
-	limit := queryLimit(r, 5000, 25000)
+	expansion, err := parseEntityExpansion(r)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	if requested := r.URL.Query().Get("spatial_catalog_id"); requested != "" {
+		requestedID, parseErr := strconv.ParseInt(requested, 10, 64)
+		if parseErr != nil || requestedID != catalog.Int64 {
+			http.Error(w, "request belongs to a different spatial catalog", http.StatusConflict)
+			return
+		}
+	}
+	token, err := decodeEntityCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	if token.Revision != 0 && (token.Revision != id || token.Catalog != catalog.Int64 || token.RootID != entityID || token.Expand != expansion.Name || token.Depth != expansion.Depth) {
+		http.Error(w, "continuation belongs to a different entity request", http.StatusConflict)
+		return
+	}
+	if token.Offset >= expansion.MaxTotal {
+		writeRevisionError(w, errors.New("continuation exceeds the bounded entity scope"))
+		return
+	}
+	limit := expansion.PageSize
+	if remaining := expansion.MaxTotal - token.Offset; limit > remaining {
+		limit = remaining
+	}
 	linkLimit := namedQueryLimit(r, "max_links", 20000, 50000)
-	rows, err := h.db.QueryContext(r.Context(), `WITH adjacent AS (
+	columns := `n.id,n.label,n.value,n.type,n.x,n.y,n.z,COALESCE(n.parent_id,''),COALESCE(n.anchor_id,''),COALESCE(n.author_id,''),COALESCE(n.community_id,''),n.position_provenance,n.source_updated_at::text,n.metrics`
+	var query string
+	var args []any
+	switch expansion.Name {
+	case "system":
+		query = fmt.Sprintf(`WITH page AS (
+ SELECT id FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='post' AND parent_id=$2
+ ORDER BY value DESC,id OFFSET $3 LIMIT $4
+), selected AS (
+ SELECT $2::text id UNION SELECT id FROM page UNION
+ SELECT DISTINCT author_id FROM spatial_catalog_entities WHERE catalog_id=$1 AND id IN (SELECT id FROM page) AND author_id IS NOT NULL
+)
+SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+ORDER BY (n.id=$2) DESC,n.type,n.value DESC,n.id`, columns)
+		args = []any{catalog.Int64, entityID, token.Offset, limit}
+	case "discussion":
+		query = fmt.Sprintf(`WITH page AS (
+ SELECT id FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='comment' AND parent_id=$2
+ ORDER BY value DESC,id OFFSET $3 LIMIT $4
+), selected AS (SELECT $2::text id UNION SELECT id FROM page)
+SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
+		args = []any{catalog.Int64, entityID, token.Offset, limit}
+	case "thread":
+		query = fmt.Sprintf(`WITH RECURSIVE descendants AS (
+ SELECT id,0 depth FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=$2
+ UNION ALL
+ SELECT child.id,parent.depth+1 FROM descendants parent
+ JOIN spatial_catalog_entities child ON child.catalog_id=$1 AND child.parent_id=parent.id
+ WHERE parent.depth<$3
+), page AS (
+ SELECT d.id FROM descendants d JOIN spatial_catalog_entities e ON e.catalog_id=$1 AND e.id=d.id
+ WHERE d.depth>0 ORDER BY d.depth,e.value DESC,e.id OFFSET $4 LIMIT $5
+), selected AS (SELECT $2::text id UNION SELECT id FROM page)
+SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
+		args = []any{catalog.Int64, entityID, expansion.Depth, token.Offset, limit}
+	default:
+		query = fmt.Sprintf(`WITH adjacent AS (
  SELECT target neighbor_id,weight FROM spatial_catalog_links WHERE catalog_id=$1 AND source=$2
  UNION ALL
  SELECT source neighbor_id,weight FROM spatial_catalog_links WHERE catalog_id=$1 AND target=$2
@@ -597,28 +716,39 @@ func (h *RevisionHandler) Entity(w http.ResponseWriter, r *http.Request) {
  SELECT neighbor_id,max(weight) priority FROM adjacent WHERE neighbor_id<>$2 GROUP BY neighbor_id
  ORDER BY priority DESC,id LIMIT $3
 )
-SELECT n.id,n.label,n.value,n.type,n.x,n.y,n.z FROM selected
+SELECT %s FROM selected
 JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
-ORDER BY selected.priority DESC,n.value DESC,n.id`, catalog.Int64, entityID, limit)
+ORDER BY selected.priority DESC,n.value DESC,n.id`, columns)
+		args = []any{catalog.Int64, entityID, limit}
+	}
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeRevisionError(w, err)
 		return
 	}
 	defer rows.Close()
-	payload := scenePayload{RevisionID: id, SpatialCatalog: catalog.Int64, Nodes: []revisionNode{}, Links: []revisionLink{}}
+	payload := scenePayload{RevisionID: id, SpatialCatalog: catalog.Int64, Scope: expansion.Name, RootID: entityID, Nodes: []revisionNode{}, Links: []revisionLink{}}
 	ids := make([]string, 0, limit)
+	childCount := 0
 	for rows.Next() {
-		var node revisionNode
-		if err := rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z); err != nil {
-			writeRevisionError(w, err)
+		node, scanErr := scanSpatialNode(rows)
+		if scanErr != nil {
+			writeRevisionError(w, scanErr)
 			return
 		}
 		payload.Nodes = append(payload.Nodes, node)
 		ids = append(ids, node.ID)
+		if node.ID != entityID && ((expansion.Name == "system" && node.Type == "post") || (expansion.Name == "discussion" && node.Type == "comment") || expansion.Name == "thread") {
+			childCount++
+		}
 	}
 	if len(payload.Nodes) == 0 {
 		http.Error(w, "entity not found", http.StatusNotFound)
 		return
+	}
+	if expansion.Name != "neighborhood" && childCount == limit && token.Offset+limit < expansion.MaxTotal {
+		payload.Truncated = true
+		payload.NextCursor = encodeEntityCursor(entityCursor{Revision: id, Catalog: catalog.Int64, RootID: entityID, Expand: expansion.Name, Depth: expansion.Depth, Offset: token.Offset + limit})
 	}
 	if err := h.appendLinks(r.Context(), &payload, ids, linkLimit); err != nil {
 		writeRevisionError(w, err)
@@ -706,17 +836,19 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
   SELECT id,label,value,type,x,y,z,true AS exact_match
   FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=$2
   UNION ALL
-  SELECT id,label,value,type,x,y,z,false AS exact_match
-  FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
-    AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+  (SELECT id,label,value,type,x,y,z,false AS exact_match
+   FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
+     AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+   ORDER BY lower(left(label,128)),id LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM (
   SELECT id,name,value,type,x,y,z,true AS exact_match
   FROM graph_revision_nodes WHERE revision_id=$1 AND id=$2
   UNION ALL
-  SELECT id,name,value,type,x,y,z,false AS exact_match
-  FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+  (SELECT id,name,value,type,x,y,z,false AS exact_match
+   FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
+   ORDER BY lower(left(name,128)),id LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, revisionID, query, prefix+"%", limit)
 	}
 	if err != nil {
