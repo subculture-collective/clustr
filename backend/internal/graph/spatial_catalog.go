@@ -2,9 +2,12 @@ package graph
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
@@ -17,6 +20,7 @@ type SpatialCatalogOptions struct {
 	Retention       int
 	WorkMemMB       int
 	ParallelWorkers int
+	KnownBotNames   []string
 }
 
 func DefaultSpatialCatalogOptions() SpatialCatalogOptions {
@@ -24,7 +28,18 @@ func DefaultSpatialCatalogOptions() SpatialCatalogOptions {
 		Retention:       positiveEnv("SPATIAL_CATALOG_RETENTION", 2),
 		WorkMemMB:       positiveEnv("SPATIAL_CATALOG_WORK_MEM_MB", 256),
 		ParallelWorkers: nonNegativeEnv("SPATIAL_CATALOG_PARALLEL_WORKERS", 0),
+		KnownBotNames:   configuredBotNames(),
 	}
+}
+
+func configuredBotNames() []string {
+	names := []string{"AutoModerator"}
+	for _, name := range strings.Split(os.Getenv("SPATIAL_CATALOG_KNOWN_BOTS"), ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // BuildSpatialCatalogAtWatermark is the full Spatial Catalog Module Interface.
@@ -51,6 +66,8 @@ func BuildSpatialCatalogWithOptions(ctx context.Context, database *sql.DB, water
 		"placement":        "anchored-semantic-3d-v1",
 		"projection":       "full-corpus-typed-weighted-v1",
 		"labels":           "semantic-label-v1",
+		"bot_policy":       AutomationPolicyVersion,
+		"metric_policy":    "galaxy-metrics-v1",
 		"parallel_workers": options.ParallelWorkers,
 	})
 	var catalogID int64
@@ -85,6 +102,97 @@ VALUES('staging',$1,'full-corpus-spatial-v1',$2::jsonb) RETURNING id`, watermark
 	// may opt into parallel plans without weakening that portable default.
 	if _, err = tx.ExecContext(ctx, `SELECT set_config('max_parallel_workers_per_gather',$1,true)`, fmt.Sprintf("%d", options.ParallelWorkers)); err != nil {
 		return failTx("parallelism", err)
+	}
+
+	knownBots := make([]string, 0, len(options.KnownBotNames)+1)
+	knownBots = append(knownBots, "automoderator")
+	for _, name := range options.KnownBotNames {
+		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
+			knownBots = append(knownBots, name)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE catalog_automated_users ON COMMIT DROP AS
+WITH activity AS (
+ SELECT author_id user_id,count(DISTINCT subreddit_id)::integer distinct_communities FROM (
+  SELECT author_id,subreddit_id FROM posts WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1
+  UNION ALL
+  SELECT author_id,subreddit_id FROM comments WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1
+ ) source_activity GROUP BY author_id
+)
+SELECT u.id user_id,
+ CASE WHEN override.user_id IS NOT NULL THEN override.reason_code
+      WHEN lower(u.username)=ANY(string_to_array($2,',')) THEN 'known-list'
+      ELSE 'broad-bot-name' END reason_code
+FROM users u
+LEFT JOIN activity ON activity.user_id=u.id
+LEFT JOIN automation_classifications override ON override.user_id=u.id
+WHERE COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $1
+AND CASE WHEN override.user_id IS NOT NULL THEN override.automated
+         ELSE lower(u.username)=ANY(string_to_array($2,','))
+           OR (COALESCE(activity.distinct_communities,0)>=20 AND lower(u.username) LIKE '%bot') END`, watermark, strings.Join(knownBots, ","))
+	if err != nil {
+		return failTx("automation_policy", err)
+	}
+	if _, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX catalog_automated_users_id ON catalog_automated_users(user_id); ANALYZE catalog_automated_users`); err != nil {
+		return failTx("automation_policy_index", err)
+	}
+
+	metricStatements := []string{`CREATE TEMP TABLE catalog_user_metrics ON COMMIT DROP AS
+WITH activity AS (
+ SELECT author_id,subreddit_id,'post' kind FROM posts p WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
+ UNION ALL
+ SELECT c.author_id,c.subreddit_id,'comment' kind FROM comments c JOIN posts p ON p.id=c.post_id
+ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)
+)
+SELECT author_id user_id,count(*) FILTER(WHERE kind='post')::bigint post_count,
+ count(*) FILTER(WHERE kind='comment')::bigint comment_count,count(DISTINCT subreddit_id)::bigint distinct_communities,
+	 count(*)::bigint activity_count FROM activity GROUP BY author_id`,
+		`CREATE UNIQUE INDEX catalog_user_metrics_id ON catalog_user_metrics(user_id)`,
+		`CREATE TEMP TABLE catalog_post_metrics ON COMMIT DROP AS
+SELECT p.id post_id,count(c.id)::bigint comment_count,
+ count(c.id) FILTER(WHERE c.parent_id IS NULL OR c.parent_id NOT LIKE 't1_%')::bigint top_level_comment_count,
+ count(c.id) FILTER(WHERE c.parent_id LIKE 't1_%')::bigint reply_count
+FROM posts p LEFT JOIN comments c ON c.post_id=p.id
+ AND COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id)
+WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
+	GROUP BY p.id`,
+		`CREATE UNIQUE INDEX catalog_post_metrics_id ON catalog_post_metrics(post_id)`,
+		`CREATE TEMP TABLE catalog_comment_metrics ON COMMIT DROP AS
+SELECT parent.id comment_id,count(child.id)::bigint reply_count
+FROM comments parent LEFT JOIN comments child ON child.parent_id='t1_'||parent.id
+ AND COALESCE(child.updated_at,child.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=child.author_id)
+JOIN posts post ON post.id=parent.post_id
+WHERE COALESCE(parent.updated_at,parent.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=parent.author_id OR b.user_id=post.author_id)
+	GROUP BY parent.id`,
+		`CREATE UNIQUE INDEX catalog_comment_metrics_id ON catalog_comment_metrics(comment_id)`,
+		`CREATE TEMP TABLE catalog_subreddit_metrics ON COMMIT DROP AS
+WITH activity AS (
+ SELECT subreddit_id,author_id,'post' kind FROM posts p WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
+ UNION ALL
+ SELECT c.subreddit_id,c.author_id,'comment' kind FROM comments c JOIN posts p ON p.id=c.post_id
+ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)
+)
+SELECT subreddit_id,count(*) FILTER(WHERE kind='post')::bigint post_count,
+ count(*) FILTER(WHERE kind='comment')::bigint comment_count,count(DISTINCT author_id)::bigint unique_users,
+	 count(*)::bigint activity_count FROM activity GROUP BY subreddit_id`,
+		`CREATE UNIQUE INDEX catalog_subreddit_metrics_id ON catalog_subreddit_metrics(subreddit_id)`,
+	}
+	for _, statement := range metricStatements {
+		var execErr error
+		if strings.Contains(statement, "$1") {
+			_, execErr = tx.ExecContext(ctx, statement, watermark)
+		} else {
+			_, execErr = tx.ExecContext(ctx, statement)
+		}
+		if execErr != nil {
+			return failTx("presentation_metrics", execErr)
+		}
 	}
 
 	logger.InfoContext(ctx, "Building full spatial catalog", "catalog_id", catalogID, "source_watermark", watermark)
@@ -128,7 +236,7 @@ FROM (
 	// Existing entities never jump when a new catalog is built. New subreddits
 	// prefer the graph-revision seed, then their strongest seeded neighbor.
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
-catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at)
+	catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'subreddit_'||s.id,COALESCE(NULLIF(btrim(s.name),''),'Subreddit '||s.id),'subreddit',GREATEST(COALESCE(s.subscribers,0),0),
  COALESCE(previous.x,resident.x,related.x + (hashtextextended(s.id::text,11)%2000)/100.0,(hashtextextended(s.id::text,11)%1000000)/10.0),
  COALESCE(previous.y,resident.y,related.y + (hashtextextended(s.id::text,12)%2000)/100.0,(hashtextextended(s.id::text,12)%1000000)/10.0),
@@ -138,12 +246,15 @@ SELECT $1,'subreddit_'||s.id,COALESCE(NULLIF(btrim(s.name),''),'Subreddit '||s.i
  NULL,
  COALESCE(previous.community_id,resident.community_id,related.community_id),
  CASE WHEN previous.id IS NOT NULL THEN 'warm-start' WHEN resident.id IS NOT NULL THEN 'revision-seeded' WHEN related.anchor_id IS NOT NULL THEN 'overlap-seeded' ELSE 'deterministic-global' END,
- COALESCE(s.updated_at,s.created_at,to_timestamp(0))
+	 COALESCE(s.updated_at,s.created_at,to_timestamp(0)),
+	 jsonb_build_object('subscribers',GREATEST(COALESCE(s.subscribers,0),0),'post_count',COALESCE(metric.post_count,0),
+	  'comment_count',COALESCE(metric.comment_count,0),'unique_users',COALESCE(metric.unique_users,0),'activity_count',COALESCE(metric.activity_count,0))
 FROM subreddits s
 LEFT JOIN spatial_catalog_current current ON current.singleton
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='subreddit_'||s.id
 LEFT JOIN catalog_resident_subreddits resident ON resident.subreddit_id=s.id
-LEFT JOIN catalog_related_subreddit_seeds related ON related.candidate_id=s.id
+	LEFT JOIN catalog_related_subreddit_seeds related ON related.candidate_id=s.id
+	LEFT JOIN catalog_subreddit_metrics metric ON metric.subreddit_id=s.id
 WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, catalogID, watermark)
 	if err != nil {
 		return failTx("subreddit_entities", err)
@@ -152,10 +263,20 @@ WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, catalogID, wat
 	// One strongest activity anchor gives each user a semantic home without a
 	// memory-heavy all-user force simulation. Repeated activity becomes value.
 	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE catalog_user_anchors ON COMMIT DROP AS
+WITH activity AS (
+ SELECT author_id user_id,subreddit_id FROM posts p
+ WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
+  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
+ UNION ALL
+ SELECT c.author_id,c.subreddit_id FROM comments c JOIN posts p ON p.id=c.post_id
+ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
+  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)
+), totals AS (
+ SELECT user_id,subreddit_id,count(*)::bigint activity_count FROM activity GROUP BY user_id,subreddit_id
+)
 SELECT DISTINCT ON (a.user_id) a.user_id,a.subreddit_id,a.activity_count,s.x,s.y,s.z,s.community_id
-FROM user_subreddit_activity a
-JOIN spatial_catalog_entities s ON s.catalog_id=$1 AND s.id='subreddit_'||a.subreddit_id
-ORDER BY a.user_id,a.activity_count DESC,a.subreddit_id`, catalogID)
+FROM totals a JOIN spatial_catalog_entities s ON s.catalog_id=$1 AND s.id='subreddit_'||a.subreddit_id
+ORDER BY a.user_id,a.activity_count DESC,a.subreddit_id`, catalogID, watermark)
 	if err != nil {
 		return failTx("user_anchors", err)
 	}
@@ -163,7 +284,7 @@ ORDER BY a.user_id,a.activity_count DESC,a.subreddit_id`, catalogID)
 		return failTx("user_anchor_index", err)
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
-catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at)
+catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'user_'||u.id,COALESCE(NULLIF(btrim(u.username),''),'User '||u.id),'user',GREATEST(COALESCE(anchor.activity_count,0),0),
  COALESCE(previous.x,anchor.x + (hashtextextended(u.id::text,21)%5000)/100.0,(hashtextextended(u.id::text,21)%1000000)/10.0),
  COALESCE(previous.y,anchor.y + (hashtextextended(u.id::text,22)%5000)/100.0,(hashtextextended(u.id::text,22)%1000000)/10.0),
@@ -171,36 +292,44 @@ SELECT $1,'user_'||u.id,COALESCE(NULLIF(btrim(u.username),''),'User '||u.id),'us
  NULL,CASE WHEN anchor.subreddit_id IS NOT NULL THEN 'subreddit_'||anchor.subreddit_id END,NULL,
  COALESCE(previous.community_id,anchor.community_id),
  CASE WHEN previous.id IS NOT NULL THEN 'warm-start' WHEN anchor.subreddit_id IS NOT NULL THEN 'activity-seeded' ELSE 'deterministic-global' END,
- COALESCE(u.updated_at,u.created_at,to_timestamp(0))
+ COALESCE(u.updated_at,u.created_at,to_timestamp(0)),
+ jsonb_build_object('post_count',COALESCE(metric.post_count,0),'comment_count',COALESCE(metric.comment_count,0),
+  'distinct_communities',COALESCE(metric.distinct_communities,0),'activity_count',COALESCE(metric.activity_count,0),'last_seen',u.last_seen)
 FROM users u
 LEFT JOIN spatial_catalog_current current ON current.singleton
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='user_'||u.id
 LEFT JOIN catalog_user_anchors anchor ON anchor.user_id=u.id
-WHERE COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2`, catalogID, watermark)
+LEFT JOIN catalog_user_metrics metric ON metric.user_id=u.id
+WHERE COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=u.id)`, catalogID, watermark)
 	if err != nil {
 		return failTx("user_entities", err)
 	}
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
-catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at)
+catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'post_'||p.id,COALESCE(NULLIF(left(regexp_replace(p.title,E'[\\n\\r\\t]+',' ','g'),160),''),'Post '||p.id),'post',GREATEST(COALESCE(p.score,0),0),
  COALESCE(previous.x,subreddit.x + (hashtextextended(p.id,31)%800)/100.0),
  COALESCE(previous.y,subreddit.y + (hashtextextended(p.id,32)%800)/100.0),
  COALESCE(previous.z,subreddit.z + (hashtextextended(p.id,33)%800)/100.0),
  'subreddit_'||p.subreddit_id,'subreddit_'||p.subreddit_id,'user_'||p.author_id,COALESCE(previous.community_id,subreddit.community_id),
  CASE WHEN previous.id IS NOT NULL THEN 'warm-start' ELSE 'subreddit-seeded' END,
- COALESCE(p.updated_at,p.created_at,to_timestamp(0))
+ COALESCE(p.updated_at,p.created_at,to_timestamp(0)),
+ jsonb_build_object('score',COALESCE(p.score,0),'comment_count',COALESCE(metric.comment_count,0),
+  'top_level_comment_count',COALESCE(metric.top_level_comment_count,0),'reply_count',COALESCE(metric.reply_count,0),'created_at',p.created_at)
 FROM posts p
 JOIN spatial_catalog_entities subreddit ON subreddit.catalog_id=$1 AND subreddit.id='subreddit_'||p.subreddit_id
 LEFT JOIN spatial_catalog_current current ON current.singleton
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='post_'||p.id
-WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2`, catalogID, watermark)
+LEFT JOIN catalog_post_metrics metric ON metric.post_id=p.id
+WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`, catalogID, watermark)
 	if err != nil {
 		return failTx("post_entities", err)
 	}
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
-catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at)
+catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'comment_'||c.id,
  COALESCE(NULLIF(btrim(left(regexp_replace(c.body,E'[\\n\\r\\t]+',' ','g'),160)),''),'Comment '||c.id),
  'comment',GREATEST(COALESCE(c.score,0),0),
@@ -210,12 +339,16 @@ SELECT $1,'comment_'||c.id,
  CASE WHEN c.parent_id LIKE 't1_%' THEN 'comment_'||substring(c.parent_id FROM 4) ELSE 'post_'||c.post_id END,
  'post_'||c.post_id,'user_'||c.author_id,COALESCE(previous.community_id,post.community_id),
  CASE WHEN previous.id IS NOT NULL THEN 'warm-start' ELSE 'post-seeded' END,
- COALESCE(c.updated_at,c.created_at,to_timestamp(0))
+ COALESCE(c.updated_at,c.created_at,to_timestamp(0)),
+ jsonb_build_object('score',COALESCE(c.score,0),'reply_count',COALESCE(metric.reply_count,0),
+  'depth',COALESCE(c.depth,0),'created_at',c.created_at)
 FROM comments c
 JOIN spatial_catalog_entities post ON post.catalog_id=$1 AND post.id='post_'||c.post_id
 LEFT JOIN spatial_catalog_current current ON current.singleton
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='comment_'||c.id
-WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2`, catalogID, watermark)
+LEFT JOIN catalog_comment_metrics metric ON metric.comment_id=c.id
+WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id)`, catalogID, watermark)
 	if err != nil {
 		return failTx("comment_entities", err)
 	}
@@ -228,11 +361,17 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2`, catalogID, wat
 		query string
 	}{
 		{"user_activity_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
-SELECT $1,'user_'||a.user_id,'subreddit_'||a.subreddit_id,'user_activity',true,a.activity_count
-FROM user_subreddit_activity a
-JOIN users u ON u.id=a.user_id AND COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2
-JOIN subreddits s ON s.id=a.subreddit_id AND COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2
-WHERE a.activity_count>0`},
+WITH activity AS (
+ SELECT author_id user_id,subreddit_id FROM posts p
+ WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
+  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
+ UNION ALL
+ SELECT c.author_id,c.subreddit_id FROM comments c JOIN posts p ON p.id=c.post_id
+ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
+  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)
+)
+SELECT $1,'user_'||user_id,'subreddit_'||subreddit_id,'user_activity',true,count(*)::bigint
+FROM activity GROUP BY user_id,subreddit_id`},
 		{"subreddit_overlap_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
 SELECT $1,'subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id),
  'subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id),'subreddit_overlap',false,max(r.overlap_count)::bigint
@@ -269,12 +408,20 @@ WHERE l.catalog_id=$1 AND (s.id IS NULL OR t.id IS NULL)`, catalogID).Scan(&orph
 		return failTx("counts", err)
 	}
 	var expectedSubreddits, expectedUsers, expectedPosts, expectedComments int64
+	var excludedUsers, excludedPosts, excludedComments int64
 	err = tx.QueryRowContext(ctx, `SELECT
 	(SELECT count(*) FROM subreddits WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1),
-	(SELECT count(*) FROM users WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1),
-	(SELECT count(*) FROM posts WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1),
-	(SELECT count(*) FROM comments WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1)`, watermark).Scan(
-		&expectedSubreddits, &expectedUsers, &expectedPosts, &expectedComments)
+	(SELECT count(*) FROM users u WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=u.id)),
+	(SELECT count(*) FROM posts p WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)),
+	(SELECT count(*) FROM comments c JOIN posts p ON p.id=c.post_id
+	 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1 AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1
+	 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)),
+	(SELECT count(*) FROM catalog_automated_users),
+	(SELECT count(*) FROM posts p WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)),
+	(SELECT count(*) FROM comments c JOIN posts p ON p.id=c.post_id
+	 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1
+	 AND EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id))`, watermark).Scan(
+		&expectedSubreddits, &expectedUsers, &expectedPosts, &expectedComments, &excludedUsers, &excludedPosts, &excludedComments)
 	if err != nil {
 		return failTx("expected_count", err)
 	}
@@ -284,10 +431,30 @@ WHERE l.catalog_id=$1 AND (s.id IS NULL OR t.id IS NULL)`, catalogID).Scan(&orph
 		minX < -1e12 || maxX > 1e12 || minY < -1e12 || maxY > 1e12 || minZ < -1e12 || maxZ > 1e12 {
 		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d expected=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, expectedEntities, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
 	}
-	validation := `{"valid":true,"complete_source_entity_coverage":true,"finite_coordinates":true,"noncollapsed_bounds":true,"no_orphan_links":true,"semantic_labels":true}`
+	_, err = tx.ExecContext(ctx, `WITH metric_values AS (
+ SELECT type,
+  CASE type WHEN 'subreddit' THEN COALESCE((metrics->>'unique_users')::bigint,0)
+            WHEN 'post' THEN COALESCE((metrics->>'comment_count')::bigint,0)
+            WHEN 'comment' THEN COALESCE((metrics->>'reply_count')::bigint,0)
+            WHEN 'user' THEN COALESCE((metrics->>'activity_count')::bigint,0) END value
+ FROM spatial_catalog_entities WHERE catalog_id=$1
+), quantiles AS (
+ SELECT type,percentile_disc(0.05) WITHIN GROUP(ORDER BY value) q05,
+  percentile_disc(0.95) WITHIN GROUP(ORDER BY value) q95 FROM metric_values GROUP BY type
+)
+UPDATE spatial_catalogs SET config=config || jsonb_build_object('normalization_quantiles',(
+ SELECT jsonb_object_agg(type,jsonb_build_object('q05',q05,'q95',q95)) FROM quantiles
+)) WHERE id=$1`, catalogID)
+	if err != nil {
+		return failTx("normalization_quantiles", err)
+	}
+	validation := `{"valid":true,"complete_filtered_entity_coverage":true,"finite_coordinates":true,"noncollapsed_bounds":true,"no_orphan_links":true,"semantic_labels":true,"typed_metrics":true}`
+	checksumInput := fmt.Sprintf("%d:%s:%d:%d:%d:%d:%d", catalogID, watermark.UTC().Format(time.RFC3339Nano), entities, links, subreddits, users, posts+comments)
+	checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(checksumInput)))
 	_, err = tx.ExecContext(ctx, `UPDATE spatial_catalogs SET status='published',published_at=now(),entity_count=$2,link_count=$3,
 subreddit_count=$4,user_count=$5,post_count=$6,comment_count=$7,min_x=$8,max_x=$9,min_y=$10,max_y=$11,min_z=$12,max_z=$13,
-validation_result=$14::jsonb WHERE id=$1`, catalogID, entities, links, subreddits, users, posts, comments, minX, maxX, minY, maxY, minZ, maxZ, validation)
+validation_result=$14::jsonb,bot_policy_version=$15,metric_policy_version='galaxy-metrics-v1',catalog_checksum=$16,
+excluded_user_count=$17,excluded_post_count=$18,excluded_comment_count=$19 WHERE id=$1`, catalogID, entities, links, subreddits, users, posts, comments, minX, maxX, minY, maxY, minZ, maxZ, validation, AutomationPolicyVersion, checksum, excludedUsers, excludedPosts, excludedComments)
 	if err != nil {
 		return failTx("finalize", err)
 	}
