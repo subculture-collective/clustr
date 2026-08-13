@@ -421,6 +421,9 @@ func (h *RevisionHandler) Region(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := queryLimit(r, 10000, 25000)
 	linkLimit := namedQueryLimit(r, "max_links", 20000, 50000)
+	if r.URL.Query().Get("max_links") == "0" {
+		linkLimit = 0
+	}
 	lod := strings.ToLower(r.URL.Query().Get("lod"))
 	if lod == "" {
 		lod = "near"
@@ -483,9 +486,11 @@ func (h *RevisionHandler) Region(w http.ResponseWriter, r *http.Request) {
 	if len(payload.Nodes) == limit {
 		payload.NextCursor = encodeRegionCursor(regionCursor{Revision: id, Catalog: payload.SpatialCatalog, Offset: token.Offset + limit})
 	}
-	if err := h.appendLinks(r.Context(), &payload, ids, linkLimit); err != nil {
-		writeRevisionError(w, err)
-		return
+	if linkLimit > 0 {
+		if err := h.appendLinks(r.Context(), &payload, ids, linkLimit); err != nil {
+			writeRevisionError(w, err)
+			return
+		}
 	}
 	writeJSON(w, payload)
 }
@@ -843,7 +848,7 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
   (SELECT id,label,value,type,x,y,z,false AS exact_match
    FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
      AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   ORDER BY lower(left(label,128)) LIMIT $4)
+   LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM (
@@ -852,7 +857,7 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
   UNION ALL
   (SELECT id,name,value,type,x,y,z,false AS exact_match
    FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   ORDER BY lower(left(name,128)) LIMIT $4)
+   LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, revisionID, query, prefix+"%", limit)
 	}
 	if err != nil {

@@ -45,7 +45,7 @@ describe('SpatialSceneClient', () => {
     const request = String(fetchMock.mock.calls[1][0]);
     expect(request).toContain('/graph/region?');
     expect(request).toContain('max_nodes=1000');
-    expect(request).toContain('max_links=5000');
+    expect(request).toContain('max_links=0');
     expect(request).toContain('revision=9');
   });
 

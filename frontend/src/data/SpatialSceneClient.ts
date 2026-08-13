@@ -111,7 +111,7 @@ export class SpatialSceneClient {
     // Camera stops must stay within the region latency/integration budget.
     // Continuations can fill additional pages; the first meaningful local
     // scene is deliberately smaller than the renderer's resident capacity.
-    const p = new URLSearchParams({ x_min: String(bounds.xMin), x_max: String(bounds.xMax), y_min: String(bounds.yMin), y_max: String(bounds.yMax), z_min: String(bounds.zMin), z_max: String(bounds.zMax), lod: 'medium', max_nodes: '1000', max_links: '5000' });
+    const p = new URLSearchParams({ x_min: String(bounds.xMin), x_max: String(bounds.xMax), y_min: String(bounds.yMin), y_max: String(bounds.yMax), z_min: String(bounds.zMin), z_max: String(bounds.zMax), lod: 'medium', max_nodes: '1000', max_links: '0' });
     return this.load(`/graph/region?${p}`, 'region', signal);
   }
 
