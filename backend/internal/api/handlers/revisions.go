@@ -843,7 +843,7 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
   (SELECT id,label,value,type,x,y,z,false AS exact_match
    FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
      AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   ORDER BY lower(left(label,128)),id LIMIT $4)
+   ORDER BY lower(left(label,128)) LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM (
@@ -852,7 +852,7 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
   UNION ALL
   (SELECT id,name,value,type,x,y,z,false AS exact_match
    FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   ORDER BY lower(left(name,128)),id LIMIT $4)
+   ORDER BY lower(left(name,128)) LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, revisionID, query, prefix+"%", limit)
 	}
 	if err != nil {
