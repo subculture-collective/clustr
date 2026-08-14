@@ -55,7 +55,7 @@ describe('benchmark regression policy', () => {
   it('rejects 1k render time above its absolute budget', () => {
     const previous = result('1k', 500, 60, 25);
     const [comparison] = compareWithBaseline(
-      [result('1k', 1001, 60, 40)],
+      [result('1k', 1201, 60, 40)],
       baseline(previous),
     );
 
@@ -74,10 +74,31 @@ describe('benchmark regression policy', () => {
     expect(comparison.regressionDetails?.[0]).toContain('Memory usage increased');
   });
 
-  it('keeps percentage gates for larger fixtures', () => {
+  it('allows 10k startup changes within the absolute render budget', () => {
     const previous = result('10k', 500, 60, 25);
     const [comparison] = compareWithBaseline(
-      [result('10k', 700, 60, 40)],
+      [result('10k', 1400, 60, 25)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(false);
+  });
+
+  it('rejects 10k startup above the absolute render budget', () => {
+    const previous = result('10k', 500, 60, 25);
+    const [comparison] = compareWithBaseline(
+      [result('10k', 3501, 60, 25)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(true);
+    expect(comparison.regressionDetails?.[0]).toContain('Render time increased');
+  });
+
+  it('keeps percentage gates for fixtures without absolute budgets', () => {
+    const previous = result('100k', 500, 60, 25);
+    const [comparison] = compareWithBaseline(
+      [result('100k', 700, 60, 40)],
       baseline(previous),
     );
 

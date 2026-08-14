@@ -30,18 +30,36 @@ function loadFixture(fixtureName: string) {
 // MUST be called BEFORE page.goto()
 async function mockGraphAPI(page: Page, fixtureName: string) {
   const fixtureData = loadFixture(fixtureName);
+  const revision = 'visual-test-revision';
+  const catalog = 'visual-test-catalog';
   
-  await page.route('**/api/graph*', async (route) => {
+  await page.route(/\/api\/graph(?:\/|\?|$)/, async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const body = requestUrl.pathname.endsWith('/manifest')
+      ? { revision_id: revision, spatial_catalog_id: catalog }
+      : { ...fixtureData, revision_id: revision, spatial_catalog_id: catalog };
+
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(fixtureData),
+      body: JSON.stringify(body),
     });
   });
 }
 
 // Helper to wait for graph to be rendered and stable
-async function waitForGraphStable(page: Page, timeout: number = 5000) {
+async function waitForGraphStable(page: Page, timeout: number = 5000, minimumVisibleNodes: number = 0) {
+  if (minimumVisibleNodes > 0) {
+    await page.waitForFunction(
+      minimum => {
+        const graph = document.querySelector('[data-visible-node-count]');
+        return Number(graph?.getAttribute('data-visible-node-count') ?? 0) >= minimum;
+      },
+      minimumVisibleNodes,
+      { timeout: 30000 },
+    );
+  }
+
   // Wait for either 3D or 2D graph container to be visible
   try {
     await page.waitForSelector('canvas, svg', { timeout: 10000 });
@@ -52,6 +70,29 @@ async function waitForGraphStable(page: Page, timeout: number = 5000) {
   
   // Wait additional time for physics to settle and rendering to stabilize
   await page.waitForTimeout(timeout);
+}
+
+async function expectRenderedGraphPixels(page: Page) {
+  await expect.poll(async () => {
+    return page.locator('[role="application"] canvas').evaluate(async (element) => {
+      const canvas = element as HTMLCanvasElement;
+      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+      if (!gl) return 0;
+      return new Promise<number>(resolve => requestAnimationFrame(() => {
+        const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const background = [pixels[0], pixels[1], pixels[2]];
+        let signalPixels = 0;
+        for (let index = 0; index < pixels.length; index += 4) {
+          const difference = Math.abs(pixels[index] - background[0])
+            + Math.abs(pixels[index + 1] - background[1])
+            + Math.abs(pixels[index + 2] - background[2]);
+          if (difference > 30) signalPixels++;
+        }
+        resolve(signalPixels);
+      }));
+    });
+  }, { timeout: 10000 }).toBeGreaterThan(20);
 }
 
 // Helper to set theme using localStorage init script
@@ -99,7 +140,8 @@ test.describe('Visual Regression Tests', () => {
       await mockGraphAPI(page, 'small');
       
       await page.goto('/');
-      await waitForGraphStable(page, 5000);
+      await waitForGraphStable(page, 5000, 1);
+      await expectRenderedGraphPixels(page);
       
       await expect(page).toHaveScreenshot('small-light-3d.png', {
         fullPage: false,
@@ -111,7 +153,8 @@ test.describe('Visual Regression Tests', () => {
       await mockGraphAPI(page, 'small');
       
       await page.goto('/');
-      await waitForGraphStable(page, 5000);
+      await waitForGraphStable(page, 5000, 1);
+      await expectRenderedGraphPixels(page);
       
       await expect(page).toHaveScreenshot('small-dark-3d.png', {
         fullPage: false,
@@ -172,7 +215,8 @@ test.describe('Visual Regression Tests', () => {
       await page.goto('/');
       
       // Longer wait for large graphs to render
-      await waitForGraphStable(page, 8000);
+      await waitForGraphStable(page, 8000, 100);
+      await expectRenderedGraphPixels(page);
       
       await expect(page).toHaveScreenshot('large-light-3d.png', {
         fullPage: false,
@@ -185,7 +229,8 @@ test.describe('Visual Regression Tests', () => {
       await mockGraphAPI(page, 'large');
       
       await page.goto('/');
-      await waitForGraphStable(page, 8000);
+      await waitForGraphStable(page, 8000, 100);
+      await expectRenderedGraphPixels(page);
       
       await expect(page).toHaveScreenshot('large-dark-3d.png', {
         fullPage: false,
@@ -200,7 +245,8 @@ test.describe('Visual Regression Tests', () => {
       await mockGraphAPI(page, 'small');
       
       await page.goto('/');
-      await waitForGraphStable(page, 5000);
+      await waitForGraphStable(page, 5000, 1);
+      await expectRenderedGraphPixels(page);
       
       // Simulate zoom by scrolling (wheel events)
       const canvas = page.locator('canvas').first();

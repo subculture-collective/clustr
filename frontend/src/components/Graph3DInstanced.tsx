@@ -634,8 +634,9 @@ export default function Graph3DInstanced(props: Props) {
                 .map(([k]) => k),
         );
 
+        const hasCommunities = graphData.nodes.some(node => node.type === 'community');
         const semanticTypes = currentLODTier <= LODTier.LOW
-            ? new Set(['community'])
+            ? new Set([hasCommunities ? 'community' : 'subreddit'])
             : currentLODTier === LODTier.MEDIUM
                 ? new Set(['community', 'subreddit', 'user'])
                 : new Set(['community', 'subreddit', 'user', 'post', 'comment']);
@@ -724,7 +725,10 @@ export default function Graph3DInstanced(props: Props) {
     useEffect(() => {
         if (!scene?.revision || scene.source !== 'overview' || !cameraRef.current || !controlsRef.current || !filtered.nodes.length) return;
         if (lastFramedRevisionRef.current === scene.revision) return;
-        const points = filtered.nodes
+        const communities = filtered.nodes.filter(node => node.type === 'community');
+        const subreddits = filtered.nodes.filter(node => node.type === 'subreddit');
+        const landmarks = communities.length ? communities : subreddits.length ? subreddits : filtered.nodes;
+        const points = landmarks
             .filter(node => Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z))
             .map(node => new THREE.Vector3(node.x, node.y, node.z));
         if (!points.length) return;

@@ -63,7 +63,7 @@ export default defineConfig({
 
   /* Run local dev server before starting benchmarks */
   webServer: {
-    command: 'npm run dev',
+    command: 'VITE_MAX_RENDER_NODES=100000 VITE_MAX_RENDER_LINKS=250000 npm run dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

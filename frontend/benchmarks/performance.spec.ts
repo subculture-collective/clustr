@@ -68,6 +68,27 @@ async function getMemoryMetrics(page: Page) {
   });
 }
 
+async function countRenderedGraphPixels(page: Page): Promise<number> {
+  return page.locator('[role="application"] canvas').evaluate(async (element) => {
+    const canvas = element as HTMLCanvasElement;
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (!gl) return 0;
+    return new Promise<number>(resolve => requestAnimationFrame(() => {
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      const background = [pixels[0], pixels[1], pixels[2]];
+      let signalPixels = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const difference = Math.abs(pixels[index] - background[0])
+          + Math.abs(pixels[index + 1] - background[1])
+          + Math.abs(pixels[index + 2] - background[2]);
+        if (difference > 30) signalPixels++;
+      }
+      resolve(signalPixels);
+    }));
+  });
+}
+
 test.describe('Performance Benchmarks', () => {
   // Run benchmarks sequentially to avoid resource contention
   test.describe.configure({ mode: 'serial' });
@@ -81,6 +102,9 @@ test.describe('Performance Benchmarks', () => {
       const fixtureData = loadFixture(fixture);
       const nodeCount = fixtureData.nodes.length;
       const linkCount = fixtureData.links.length;
+      const linkedNodeCount = new Set(
+        fixtureData.links.flatMap((link: { source: string; target: string }) => [link.source, link.target]),
+      ).size;
       
       console.log(`   Nodes: ${nodeCount.toLocaleString()}, Links: ${linkCount.toLocaleString()}`);
       
@@ -88,24 +112,44 @@ test.describe('Performance Benchmarks', () => {
       const benchmarkStart = Date.now();
       
       // Intercept API calls and return fixture data
-      await page.route('**/api/graph*', async (route) => {
+      let manifestRequests = 0;
+      let graphRequests = 0;
+      await page.route(/\/api\/graph(?:\/|\?|$)/, async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const revision = 'benchmark-revision';
+        const catalog = 'benchmark-catalog';
+        const isManifest = requestUrl.pathname.endsWith('/manifest');
+        if (isManifest) manifestRequests++;
+        else graphRequests++;
+        const body = isManifest
+          ? { revision_id: revision, spatial_catalog_id: catalog }
+          : { ...fixtureData, revision_id: revision, spatial_catalog_id: catalog };
+
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(fixtureData),
+          body: JSON.stringify(body),
         });
       });
       
       // Add performance marks for measurement as early as possible in the page lifecycle
       await page.addInitScript(() => {
+        localStorage.setItem('enableAdaptiveLOD', 'false');
         performance.mark('navigation-start');
       });
 
       // Navigate to the app
-      await page.goto('/');
+      await page.goto('/?adaptiveLOD=0&f_subreddit=1&f_user=1&f_post=1&f_comment=1');
       
       // Wait for the page to load
       await page.waitForLoadState('networkidle');
+      expect(manifestRequests).toBeGreaterThan(0);
+      expect(graphRequests).toBeGreaterThan(0);
+      const graph = page.locator('[data-visible-node-count]');
+      await expect(graph).toHaveAttribute('data-visible-node-count', String(linkedNodeCount), {
+        timeout: 30000,
+      });
+      await expect.poll(() => countRenderedGraphPixels(page), { timeout: 10000 }).toBeGreaterThan(20);
       
       // Measure time until UI is ready (not just JSON parse)
       const uiReadyStartTime = Date.now();
