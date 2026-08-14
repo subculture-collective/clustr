@@ -5,6 +5,8 @@ import VirtualList from "./VirtualList";
 interface Stats {
   totalNodes: number;
   totalLinks: number;
+  sampledNodes: number;
+  sampledLinks: number;
   nodesByType: Record<string, number>;
   avgDegree: number;
   maxDegree: number;
@@ -29,6 +31,11 @@ interface Stats {
   }>;
 }
 
+interface GraphManifest {
+  node_count: number;
+  link_count: number;
+}
+
 type DashboardProps = {
   onViewMode?: (mode: "3d" | "2d") => void;
   onFocusNode?: (id: string) => void;
@@ -48,11 +55,14 @@ export default function Dashboard({ onViewMode, onFocusNode }: DashboardProps) {
     setError(null);
     try {
       const base = (import.meta.env?.VITE_API_URL || "/api").replace(/\/$/, "");
-      const response = await fetch(
-        `${base}/graph?max_nodes=50000&max_links=100000`
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = (await response.json()) as GraphData;
+      const [graphResponse, manifestResponse] = await Promise.all([
+        fetch(`${base}/graph?max_nodes=50000&max_links=100000`),
+        fetch(`${base}/graph/manifest`),
+      ]);
+      if (!graphResponse.ok) throw new Error(`HTTP ${graphResponse.status}`);
+      if (!manifestResponse.ok) throw new Error(`HTTP ${manifestResponse.status}`);
+      const data = (await graphResponse.json()) as GraphData;
+      const manifest = (await manifestResponse.json()) as GraphManifest;
 
       // Calculate stats
       const degreeMap = new Map<string, number>();
@@ -158,8 +168,10 @@ export default function Dashboard({ onViewMode, onFocusNode }: DashboardProps) {
         .slice(0, 15);
 
       setStats({
-        totalNodes: data.nodes.length,
-        totalLinks: data.links.length,
+        totalNodes: manifest.node_count,
+        totalLinks: manifest.link_count,
+        sampledNodes: data.nodes.length,
+        sampledLinks: data.links.length,
         nodesByType,
         avgDegree,
         maxDegree,
@@ -224,32 +236,38 @@ export default function Dashboard({ onViewMode, onFocusNode }: DashboardProps) {
         {/* Overview Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Total Nodes</div>
-            <div className="text-3xl font-bold">
+            <div className="text-gray-400 text-sm mb-2">Catalog Entities</div>
+            <div className="text-3xl font-bold" title={stats.totalNodes.toLocaleString()}>
               {formatNumber(stats.totalNodes)}
             </div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Total Links</div>
-            <div className="text-3xl font-bold">
-              {formatNumber(stats.totalLinks)}
+            <div className="mt-2 text-xs text-gray-500">
+              {formatNumber(stats.sampledNodes)} sampled for analysis
             </div>
           </div>
           <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Average Degree</div>
+            <div className="text-gray-400 text-sm mb-2">Catalog Links</div>
+            <div className="text-3xl font-bold" title={stats.totalLinks.toLocaleString()}>
+              {formatNumber(stats.totalLinks)}
+            </div>
+            <div className="mt-2 text-xs text-gray-500">
+              {formatNumber(stats.sampledLinks)} sampled for analysis
+            </div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-6">
+            <div className="text-gray-400 text-sm mb-2">Sample Average Degree</div>
             <div className="text-3xl font-bold">
               {stats.avgDegree.toFixed(1)}
             </div>
           </div>
           <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Max Degree</div>
+            <div className="text-gray-400 text-sm mb-2">Sample Max Degree</div>
             <div className="text-3xl font-bold">{stats.maxDegree}</div>
           </div>
         </div>
 
         {/* Nodes by Type */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Nodes by Type</h2>
+          <h2 className="text-xl font-semibold mb-4">Sampled Nodes by Type</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {Object.entries(stats.nodesByType).map(([type, count]) => {
               const colors: Record<string, string> = {
