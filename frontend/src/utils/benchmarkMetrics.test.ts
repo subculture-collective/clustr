@@ -106,10 +106,31 @@ describe('benchmark regression policy', () => {
     expect(comparison.regressionDetails).toHaveLength(2);
   });
 
-  it('always rejects an FPS regression', () => {
+  it('rejects an FPS regression beyond the percentage threshold', () => {
     const previous = result('1k', 500, 60, 25);
     const [comparison] = compareWithBaseline(
       [result('1k', 500, 50, 25)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(true);
+    expect(comparison.regressionDetails?.[0]).toContain('FPS dropped');
+  });
+
+  it('allows sampling jitter at very low frame rates', () => {
+    const previous = result('50k', 500, 1, 25);
+    const [comparison] = compareWithBaseline(
+      [result('50k', 500, 0.85, 25)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(false);
+  });
+
+  it('rejects a material drop at very low frame rates', () => {
+    const previous = result('50k', 500, 1, 25);
+    const [comparison] = compareWithBaseline(
+      [result('50k', 500, 0.7, 25)],
       baseline(previous),
     );
 

@@ -73,8 +73,10 @@ export function calculatePercentageChange(current: number, baseline: number): nu
  * Check if FPS regression exceeds threshold
  */
 export function isFpsRegression(currentFps: number, baselineFps: number, threshold: number = 10): boolean {
-  const change = calculatePercentageChange(currentFps, baselineFps);
-  return change < -threshold; // Negative change means performance degradation
+  // At very low frame rates, one sampled frame can move the result by more
+  // than 10%. Preserve the percentage gate while allowing 0.2 FPS of jitter.
+  const allowedDrop = Math.max(0.2, baselineFps * (threshold / 100));
+  return currentFps < baselineFps - allowedDrop;
 }
 
 /**

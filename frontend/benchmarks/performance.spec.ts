@@ -151,7 +151,7 @@ test.describe('Performance Benchmarks', () => {
       });
       // Rendering visibility is a setup condition, while renderTime below is the
       // measured budget. Large fixtures need extra headroom on two-core CI runners.
-      await expect.poll(() => countRenderedGraphPixels(page), { timeout: 30000 }).toBeGreaterThan(20);
+      await expect.poll(() => countRenderedGraphPixels(page), { timeout: 60000 }).toBeGreaterThan(20);
       
       // Measure time until UI is ready (not just JSON parse)
       const uiReadyStartTime = Date.now();
@@ -228,7 +228,7 @@ test.describe('Performance Benchmarks', () => {
       if (fps < 1) {
         console.warn(`   ⚠️  WARNING: Very low FPS detected (${fps.toFixed(1)})`);
       }
-      expect(renderTimeResult).toBeLessThan(60000); // Max 60s initial render
+      expect(renderTimeResult).toBeLessThan(90000); // Catastrophic guard for software-rendered CI
       
       console.log(`   ✅ Benchmark complete (${Date.now() - benchmarkStart}ms total)\n`);
     });

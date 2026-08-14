@@ -1,19 +1,19 @@
 {
-  "version": "0.0.0",
-  "timestamp": "2026-02-11T18:24:44.577Z",
+  "version": "gitea-2cpu-v1",
+  "timestamp": "2026-08-14T20:16:26.670Z",
   "results": [
     {
       "fixture": "1k",
       "metrics": {
-        "renderTime": 592.5,
-        "steadyStateFps": 48.666666666666664,
-        "dataParseTime": 67,
-        "physicsWarmupTime": 5002,
-        "memoryUsage": 26.793822288513184,
-        "peakMemoryUsage": 26.793822288513184,
+        "renderTime": 3171.7999999970198,
+        "steadyStateFps": 9.678043744720506,
+        "dataParseTime": 200,
+        "physicsWarmupTime": 5001,
+        "memoryUsage": 53.28781509399414,
+        "peakMemoryUsage": 53.28781509399414,
         "nodeCount": 1000,
         "linkCount": 2500,
-        "timestamp": "2026-02-11T18:24:16.691Z"
+        "timestamp": "2026-08-14T20:14:28.063Z"
       },
       "metadata": {
         "browser": "chromium",
@@ -27,15 +27,15 @@
     {
       "fixture": "10k",
       "metrics": {
-        "renderTime": 992.1999999999534,
-        "steadyStateFps": 9.653794940079893,
-        "dataParseTime": 380,
-        "physicsWarmupTime": 5001,
-        "memoryUsage": 72.30369853973389,
-        "peakMemoryUsage": 72.30369853973389,
+        "renderTime": 12667.800000011921,
+        "steadyStateFps": 1.355197181189863,
+        "dataParseTime": 892,
+        "physicsWarmupTime": 5000,
+        "memoryUsage": 44.86584663391113,
+        "peakMemoryUsage": 44.86584663391113,
         "nodeCount": 10000,
         "linkCount": 25000,
-        "timestamp": "2026-02-11T18:24:26.670Z"
+        "timestamp": "2026-08-14T20:14:51.967Z"
       },
       "metadata": {
         "browser": "chromium",
@@ -49,15 +49,15 @@
     {
       "fixture": "50k",
       "metrics": {
-        "renderTime": 3933.1999999999534,
-        "steadyStateFps": 2.1663778162911145,
-        "dataParseTime": 2987,
-        "physicsWarmupTime": 5001,
-        "memoryUsage": 445.4016237258911,
-        "peakMemoryUsage": 445.4016237258911,
+        "renderTime": 60488.89999999106,
+        "steadyStateFps": 0.42586717202796315,
+        "dataParseTime": 4504,
+        "physicsWarmupTime": 5006,
+        "memoryUsage": 42.69370365142822,
+        "peakMemoryUsage": 42.69370365142822,
         "nodeCount": 50000,
         "linkCount": 125000,
-        "timestamp": "2026-02-11T18:24:44.126Z"
+        "timestamp": "2026-08-14T20:16:17.483Z"
       },
       "metadata": {
         "browser": "chromium",
