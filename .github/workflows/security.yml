@@ -16,8 +16,8 @@ permissions:
   actions: read
 
 jobs:
-  codeql-backend:
-    name: CodeQL Analysis (Go)
+  sast-backend:
+    name: Go Static Security Analysis
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -25,28 +25,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          languages: go
-          queries: security-and-quality
-          config: |
-            paths:
-              - backend
-            paths-ignore:
-              - backend/internal/db/*.sql.go
-              - backend/**/*_test.go
+          go-version: '1.25.13'
+          cache: true
+          cache-dependency-path: backend/go.sum
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Run gosec
+        working-directory: ./backend
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.10
+          gosec -quiet \
+            -include=G101,G102,G103,G106,G107,G201,G202,G203,G204,G301,G302,G303,G305,G401,G402,G403,G405,G406,G407,G501,G502,G503,G504,G505,G506,G601,G602 \
+            ./...
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:go"
-
-  codeql-frontend:
-    name: CodeQL Analysis (JavaScript/TypeScript)
+  sast-frontend:
+    name: Frontend Static Analysis
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -54,22 +49,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          languages: javascript-typescript
-          queries: security-and-quality
-          config: |
-            paths:
-              - frontend
-            paths-ignore:
-              - frontend/node_modules
-              - frontend/dist
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:javascript-typescript"
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run static checks
+        working-directory: ./frontend
+        run: |
+          npm run lint
+          npm run build
 
   dependency-scan-backend:
     name: Go Vulnerability Scan
@@ -131,13 +126,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@main
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --only-verified
+          go-version: '1.25.13'
+          cache: false
+
+      - name: Scan commit range with Gitleaks
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
+          gitleaks git --redact --log-opts="origin/${{ github.event.repository.default_branch }}..HEAD"
 
   docker-security:
     name: Docker Image Security Scan
@@ -151,9 +149,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Get Dockerfile path
         id: dockerfile
         run: |
@@ -166,37 +161,25 @@ jobs:
           fi
 
       - name: Build Docker image for scanning
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ steps.dockerfile.outputs.context }}
-          file: ${{ steps.dockerfile.outputs.path }}
-          push: false
-          load: true
-          tags: ${{ matrix.component }}:scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            --file "${{ steps.dockerfile.outputs.path }}" \
+            --tag "${{ matrix.component }}:scan" \
+            "${{ steps.dockerfile.outputs.context }}"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ matrix.component }}:scan
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: "trivy-${{ matrix.component }}"
-
   security-summary:
     name: Security Summary
     runs-on: ubuntu-latest
-    needs: [codeql-backend, codeql-frontend, dependency-scan-backend, dependency-scan-frontend, secret-scanning, docker-security]
+    needs: [sast-backend, sast-frontend, dependency-scan-backend, dependency-scan-frontend, secret-scanning, docker-security]
     if: always()
 
     steps:
@@ -204,8 +187,8 @@ jobs:
         run: |
           echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- CodeQL Backend: ${{ needs.codeql-backend.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- CodeQL Frontend: ${{ needs.codeql-frontend.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Go Static Analysis: ${{ needs.sast-backend.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend Static Analysis: ${{ needs.sast-frontend.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Go Vulnerability Scan: ${{ needs.dependency-scan-backend.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- npm Vulnerability Scan: ${{ needs.dependency-scan-frontend.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Secret Scanning: ${{ needs.secret-scanning.result }}" >> $GITHUB_STEP_SUMMARY
@@ -213,8 +196,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Fail if any critical job failed
-          if [ "${{ needs.dependency-scan-backend.result }}" = "failure" ] || \
+          if [ "${{ needs.sast-backend.result }}" = "failure" ] || \
+             [ "${{ needs.sast-frontend.result }}" = "failure" ] || \
+             [ "${{ needs.dependency-scan-backend.result }}" = "failure" ] || \
              [ "${{ needs.dependency-scan-frontend.result }}" = "failure" ] || \
+             [ "${{ needs.secret-scanning.result }}" = "failure" ] || \
              [ "${{ needs.docker-security.result }}" = "failure" ]; then
             echo "❌ Security scan failed - critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
             exit 1

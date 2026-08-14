@@ -23,9 +23,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,7 +53,7 @@ jobs:
       - name: Run tests
         working-directory: ./backend
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/reddit_cluster_test?sslmode=disable
+          DATABASE_URL: postgres://postgres:postgres@postgres:5432/reddit_cluster_test?sslmode=disable
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
@@ -168,9 +165,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Get Docker file name
         id: dockerfile
         run: |
@@ -181,18 +175,14 @@ jobs:
           fi
 
       - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/${{ steps.dockerfile.outputs.file }}
-          push: false
-          tags: reddit-cluster-${{ matrix.component }}:${{ github.sha }}
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
-            BUILD_TIME=${{ github.event.head_commit.timestamp }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            --file "./backend/${{ steps.dockerfile.outputs.file }}" \
+            --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
+            --build-arg "VERSION=${{ github.ref_name }}" \
+            --build-arg "COMMIT=${{ github.sha }}" \
+            --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
+            ./backend
 
   build-frontend-image:
     name: Build Frontend Docker Image
@@ -203,15 +193,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: false
-          tags: reddit-cluster-frontend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            --file ./frontend/Dockerfile \
+            --tag "reddit-cluster-frontend:${{ github.sha }}" \
+            ./frontend
