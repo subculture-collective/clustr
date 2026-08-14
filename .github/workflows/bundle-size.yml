@@ -47,7 +47,7 @@ jobs:
           npm run size:json > bundle-stats.json
 
       - name: Upload bundle visualizer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: bundle-stats
           path: frontend/dist/stats.html
@@ -214,4 +214,3 @@ jobs:
             if (significantIncrease && !anyExceeded) {
               core.setFailed('Bundle size increased significantly (>5% or >50KB)');
             }
-
