@@ -149,7 +149,9 @@ test.describe('Performance Benchmarks', () => {
       await expect(graph).toHaveAttribute('data-visible-node-count', String(linkedNodeCount), {
         timeout: 30000,
       });
-      await expect.poll(() => countRenderedGraphPixels(page), { timeout: 10000 }).toBeGreaterThan(20);
+      // Rendering visibility is a setup condition, while renderTime below is the
+      // measured budget. Large fixtures need extra headroom on two-core CI runners.
+      await expect.poll(() => countRenderedGraphPixels(page), { timeout: 30000 }).toBeGreaterThan(20);
       
       // Measure time until UI is ready (not just JSON parse)
       const uiReadyStartTime = Date.now();
