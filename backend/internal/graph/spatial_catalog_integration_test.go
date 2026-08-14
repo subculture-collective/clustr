@@ -135,4 +135,11 @@ WHERE link.catalog_id=$1 AND (source.id IS NULL OR target.id IS NULL)`, first).S
 	if current != second {
 		t.Fatalf("current catalog=%d want %d", current, second)
 	}
+	var projectionTable sql.NullString
+	if err := database.QueryRowContext(ctx, `SELECT to_regclass('public.catalog_subreddit_overlap_projection')::text`).Scan(&projectionTable); err != nil {
+		t.Fatal(err)
+	}
+	if projectionTable.Valid {
+		t.Fatalf("overlap projection table leaked after publication: %s", projectionTable.String)
+	}
 }

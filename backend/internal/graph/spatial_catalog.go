@@ -354,14 +354,61 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 	}
 
 	logger.InfoContext(ctx, "Spatial entities placed", "catalog_id", catalogID)
+	// The catalog is bulk-loaded in this transaction, so the table statistics do
+	// not otherwise describe the new catalog_id. Refresh them before joining the
+	// staged entities back to the relationship tables; without this PostgreSQL can
+	// estimate one entity and choose a multiplicative nested-loop plan.
+	if _, err = tx.ExecContext(ctx, `ANALYZE spatial_catalog_entities`); err != nil {
+		return failTx("entity_statistics", err)
+	}
+	if _, err = tx.ExecContext(ctx, `SET LOCAL enable_nestloop = off`); err != nil {
+		return failTx("relationship_join_plan", err)
+	}
+	if options.ParallelWorkers > 0 {
+		// INSERT ... SELECT is not parallelized by PostgreSQL. Materialize the
+		// expensive projection with CTAS first and keep the final insert simple.
+		// These cost settings apply only to this publication transaction.
+		for stage, statement := range map[string]string{
+			"parallel_setup_cost":           `SET LOCAL parallel_setup_cost = 0`,
+			"parallel_tuple_cost":           `SET LOCAL parallel_tuple_cost = 0`,
+			"parallel_table_scan_threshold": `SET LOCAL min_parallel_table_scan_size = 0`,
+			"parallel_index_scan_threshold": `SET LOCAL min_parallel_index_scan_size = 0`,
+		} {
+			if _, err = tx.ExecContext(ctx, statement); err != nil {
+				return failTx(stage, err)
+			}
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, `CREATE UNLOGGED TABLE catalog_subreddit_overlap_projection AS
+	SELECT source_entity.id source,target_entity.id target,max(r.overlap_count)::bigint weight
+	FROM subreddit_relationships r
+	JOIN subreddits source ON source.id=r.source_subreddit_id AND COALESCE(source.updated_at,source.created_at,to_timestamp(0)) <= $2
+	JOIN subreddits target ON target.id=r.target_subreddit_id AND COALESCE(target.updated_at,target.created_at,to_timestamp(0)) <= $2
+	JOIN spatial_catalog_entities source_entity
+	  ON source_entity.catalog_id=$1 AND source_entity.id='subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id)
+	JOIN spatial_catalog_entities target_entity
+	  ON target_entity.catalog_id=$1 AND target_entity.id='subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id)
+	WHERE r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
+	GROUP BY source_entity.id,target_entity.id`, catalogID, watermark)
+	if err != nil {
+		return failTx("subreddit_overlap_projection", err)
+	}
+	if _, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX catalog_subreddit_overlap_projection_pair
+	ON catalog_subreddit_overlap_projection(source,target); ANALYZE catalog_subreddit_overlap_projection`); err != nil {
+		return failTx("subreddit_overlap_projection_index", err)
+	}
+	logger.InfoContext(ctx, "Spatial relationship projection complete", "catalog_id", catalogID, "stage", "subreddit_overlap_projection")
+
 	// Normalized semantic links are inserted in deterministic groups. Joins to
 	// the catalog enforce the source watermark and prevent orphan endpoints.
 	linkStatements := []struct {
 		stage string
 		query string
+		args  []any
 	}{
 		{"user_activity_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
-WITH activity AS (
+	WITH activity AS (
  SELECT author_id user_id,subreddit_id FROM posts p
  WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
   AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)
@@ -375,27 +422,22 @@ WITH activity AS (
 )
 SELECT $1,user_entity.id,subreddit_entity.id,'user_activity',true,weighted.weight
 FROM weighted
-JOIN spatial_catalog_entities user_entity
-  ON user_entity.catalog_id=$1 AND user_entity.id='user_'||weighted.user_id
-JOIN spatial_catalog_entities subreddit_entity
-  ON subreddit_entity.catalog_id=$1 AND subreddit_entity.id='subreddit_'||weighted.subreddit_id`},
+	JOIN spatial_catalog_entities user_entity
+	  ON user_entity.catalog_id=$1 AND user_entity.id='user_'||weighted.user_id
+	JOIN spatial_catalog_entities subreddit_entity
+	  ON subreddit_entity.catalog_id=$1 AND subreddit_entity.id='subreddit_'||weighted.subreddit_id`, []any{catalogID, watermark}},
 		{"subreddit_overlap_links", `INSERT INTO spatial_catalog_links(catalog_id,source,target,relation,directed,weight)
-SELECT $1,source_entity.id,target_entity.id,'subreddit_overlap',false,max(r.overlap_count)::bigint
-FROM subreddit_relationships r
-JOIN subreddits source ON source.id=r.source_subreddit_id AND COALESCE(source.updated_at,source.created_at,to_timestamp(0)) <= $2
-JOIN subreddits target ON target.id=r.target_subreddit_id AND COALESCE(target.updated_at,target.created_at,to_timestamp(0)) <= $2
-JOIN spatial_catalog_entities source_entity
-  ON source_entity.catalog_id=$1 AND source_entity.id='subreddit_'||LEAST(r.source_subreddit_id,r.target_subreddit_id)
-JOIN spatial_catalog_entities target_entity
-  ON target_entity.catalog_id=$1 AND target_entity.id='subreddit_'||GREATEST(r.source_subreddit_id,r.target_subreddit_id)
-WHERE r.source_subreddit_id<>r.target_subreddit_id AND r.overlap_count>0
-GROUP BY source_entity.id,target_entity.id`},
+	SELECT $1,source,target,'subreddit_overlap',false,weight
+	FROM catalog_subreddit_overlap_projection`, []any{catalogID}},
 	}
 	for _, statement := range linkStatements {
-		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
+		if _, err = tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			return failTx(statement.stage, err)
 		}
 		logger.InfoContext(ctx, "Spatial relationship stage complete", "catalog_id", catalogID, "stage", statement.stage)
+	}
+	if _, err = tx.ExecContext(ctx, `DROP TABLE catalog_subreddit_overlap_projection`); err != nil {
+		return failTx("subreddit_overlap_projection_cleanup", err)
 	}
 
 	var entities, links, subreddits, users, posts, comments, emptyLabels int64
