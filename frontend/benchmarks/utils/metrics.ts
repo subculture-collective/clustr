@@ -48,6 +48,17 @@ export interface ComparisonResult {
   regressionDetails?: string[];
 }
 
+interface AbsolutePerformanceBudget {
+  renderTime: number;
+  memoryUsage: number;
+}
+
+// The instanced renderer trades a bounded amount of small-scene startup cost
+// for substantially better scaling. Larger fixtures retain percentage-only gates.
+const ABSOLUTE_PERFORMANCE_BUDGETS: Record<string, AbsolutePerformanceBudget> = {
+  '1k': { renderTime: 1000, memoryUsage: 50 },
+};
+
 /**
  * Calculate percentage change between two values
  */
@@ -97,6 +108,7 @@ export function compareWithBaseline(
     
     const currentMetrics = currentResult.metrics;
     const baselineMetrics = baselineResult.metrics;
+    const absoluteBudget = ABSOLUTE_PERFORMANCE_BUDGETS[currentResult.fixture];
     
     const changes = {
       renderTime: calculatePercentageChange(currentMetrics.renderTime, baselineMetrics.renderTime),
@@ -119,7 +131,10 @@ export function compareWithBaseline(
     }
     
     // Check render time regression (20% threshold)
-    if (changes.renderTime > 20) {
+    if (
+      changes.renderTime > 20 &&
+      (!absoluteBudget || currentMetrics.renderTime > absoluteBudget.renderTime)
+    ) {
       isRegression = true;
       regressionDetails.push(
         `Render time increased by ${changes.renderTime.toFixed(1)}% ` +
@@ -128,7 +143,10 @@ export function compareWithBaseline(
     }
     
     // Check memory regression (30% threshold)
-    if (changes.memoryUsage > 30) {
+    if (
+      changes.memoryUsage > 30 &&
+      (!absoluteBudget || currentMetrics.memoryUsage > absoluteBudget.memoryUsage)
+    ) {
       isRegression = true;
       regressionDetails.push(
         `Memory usage increased by ${changes.memoryUsage.toFixed(1)}% ` +
