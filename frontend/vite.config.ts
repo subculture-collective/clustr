@@ -57,8 +57,12 @@ export default defineConfig(({ mode }) => {
         'src/utils/apiErrors.ts',
         // Exclude Graph components that require extensive mocking of WebGL/Three.js
         'src/components/Graph3D.tsx',
+        'src/components/Graph3DInstanced.tsx',
         'src/components/Graph2D.tsx',
         'src/components/CommunityMap.tsx',
+        'src/App.tsx',
+        // Browser workers are exercised by the Playwright performance suite.
+        'src/workers/**',
         // Mock data files
         'src/__mocks__/**/*.ts',
       ],
