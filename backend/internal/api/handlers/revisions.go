@@ -583,8 +583,20 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 		writeRevisionError(w, err)
 		return
 	}
+	useCatalog := catalog.Valid
+	if useCatalog {
+		var hasMembers bool
+		err = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
+SELECT 1 FROM spatial_catalog_entities WHERE catalog_id=$1 AND community_id=$2
+)`, catalog.Int64, cid).Scan(&hasMembers)
+		if err != nil {
+			writeRevisionError(w, err)
+			return
+		}
+		useCatalog = hasMembers
+	}
 	var rows *sql.Rows
-	if catalog.Valid {
+	if useCatalog {
 		rows, err = h.db.QueryContext(r.Context(), fmt.Sprintf(`SELECT id,label,value,type,x,y,z,COALESCE(parent_id,''),COALESCE(anchor_id,''),COALESCE(author_id,''),COALESCE(community_id,''),position_provenance,source_updated_at::text,metrics FROM spatial_catalog_entities
 WHERE catalog_id=$1 AND community_id=$2 AND %s ORDER BY value DESC,id LIMIT $3`, typeFilter), catalog.Int64, cid, limit)
 	} else {
@@ -602,7 +614,7 @@ WHERE catalog_id=$1 AND community_id=$2 AND %s ORDER BY value DESC,id LIMIT $3`,
 	ids := []string{}
 	for rows.Next() {
 		var node revisionNode
-		if catalog.Valid {
+		if useCatalog {
 			node, err = scanSpatialNode(rows)
 		} else {
 			err = rows.Scan(&node.ID, &node.Name, &node.Val, &node.Type, &node.X, &node.Y, &node.Z)
