@@ -1,4 +1,4 @@
-FROM golang:1.24.9-bookworm AS builder
+FROM golang:1.25.13-bookworm AS builder
 
 WORKDIR /app
 
@@ -40,4 +40,4 @@ COPY --from=builder /app/precalculate .
 COPY scripts /app/scripts
 
 # Run the application
-CMD ["./precalculate"] 
+CMD ["./precalculate"]
