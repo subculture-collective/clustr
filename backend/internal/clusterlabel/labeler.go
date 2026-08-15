@@ -119,10 +119,14 @@ func callProvider(ctx context.Context, e Evidence, config Config) (Result, error
 	if err != nil {
 		return Result{}, err
 	}
+	allowedGrounding := uniqueStrings(append(append(append([]string{}, e.Representatives...), e.Topics...), e.NeighborMacroGroups...))
+	if len(allowedGrounding) == 0 {
+		return Result{}, errors.New("label evidence is empty")
+	}
 	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"display_name", "evidence_grounding", "confidence", "method_version"}, "properties": map[string]any{
-		"display_name": map[string]any{"type": "string"}, "evidence_grounding": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "method_version": map[string]any{"type": "string"}}}
+		"display_name": map[string]any{"type": "string"}, "evidence_grounding": map[string]any{"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": allowedGrounding}}, "confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "method_version": map[string]any{"type": "string", "const": PromptVersion}}}
 	evidenceJSON, _ := json.Marshal(e)
-	prompt := "Name this computed subreddit cluster. Return a neutral 2-5 word noun phrase. Ground it only in the supplied subreddit names, aggregate TF-IDF topics, metrics, and neighboring macro-group names. Do not infer demographics, ideology, identity, intent, or facts not present. Do not merely repeat one giant subreddit. Evidence: " + string(evidenceJSON)
+	prompt := "Name this computed subreddit cluster. Return a neutral 2-5 word noun phrase. For evidence_grounding, select only exact, unmodified strings from the supplied representative_subreddits, tfidf_topics, or neighbor_macro_groups arrays. Ground the name only in that evidence and the aggregate metrics. Do not infer demographics, ideology, identity, intent, or facts not present. Do not merely repeat one giant subreddit. Evidence: " + string(evidenceJSON)
 	requestBody := map[string]any{"model": config.Model, "temperature": 0, "messages": []map[string]string{{"role": "system", "content": "You label aggregate communities neutrally. Never use or request usernames, post text, or comment text."}, {"role": "user", "content": prompt}}, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "cluster_label", "strict": true, "schema": schema}}}
 	body, _ := json.Marshal(requestBody)
 	timeout := config.Timeout
@@ -172,7 +176,7 @@ func validate(result Result, e Evidence) error {
 	if result.Confidence < 0 || result.Confidence > 1 {
 		return errors.New("invalid confidence")
 	}
-	if result.MethodVersion == "" || result.Grounding == "" {
+	if result.MethodVersion != PromptVersion || result.Grounding == "" {
 		return errors.New("missing method or grounding")
 	}
 	evidence := strings.ToLower(strings.Join(append(append(append([]string{}, e.Representatives...), e.Topics...), e.NeighborMacroGroups...), " "))
