@@ -50,6 +50,14 @@ export interface PublishedCommunity {
   x: number;
   y: number;
   z: number;
+  display_name: string;
+  evidence_label: string;
+  macro_group_id?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  bridge: boolean;
+  distinctiveness: number;
+  affinity_confidence: number;
 }
 
 export interface PublishedCommunities {
@@ -58,6 +66,34 @@ export interface PublishedCommunities {
   level: number;
   communities: PublishedCommunity[];
   next_cursor?: string;
+}
+
+export type CatalogType = '' | 'subreddit' | 'user' | 'post' | 'comment';
+export type CatalogSort = 'relevance' | 'activity' | 'size' | 'distinctiveness' | 'newest';
+
+export interface CatalogItem {
+  id: string; type: Exclude<CatalogType, ''>; label: string; value: number;
+  parent_id?: string; author_id?: string; community_id?: string; macro_group_id?: string;
+  title?: string; body?: string; description?: string; source_permalink?: string;
+  sensitive: boolean; sensitivity_sources?: string[]; updated_at: string;
+  metrics: Record<string, unknown>; distinctiveness: number; affinity_confidence: number; snippet?: string;
+}
+
+export interface CatalogResponse {
+  revision_id: string | number; spatial_catalog_id: string | number; returned_count: number; total_count: number;
+  items: CatalogItem[]; next_cursor?: string; applied_filters: Record<string, unknown>; partial: boolean; stale: boolean;
+}
+
+export interface CatalogFacets {
+  revision_id: string | number; spatial_catalog_id: string | number; exact_total: number;
+  types: Array<{ type: Exclude<CatalogType, ''>; count: number }>; partial: boolean;
+}
+
+export interface CatalogTreeResponse {
+  revision_id: string | number; spatial_catalog_id: string | number;
+  root: { id: string; type: string; label: string };
+  children: Array<{ id: string; type: string; label: string; value: number; author_id?: string; child_count: number; sensitive: boolean; metrics: Record<string, unknown> }>;
+  returned_count: number; cross_linked_authors: string[]; next_cursor?: string; partial: boolean; stale: boolean;
 }
 
 export interface SpatialSearchResponse {
@@ -188,6 +224,33 @@ export class SpatialSceneClient {
       withRevision(`/graph/communities?${parameters}`, revision),
       signal,
     );
+  }
+
+  public async catalogPage(options: { q?: string; type?: CatalogType; sort?: CatalogSort; cursor?: string; entityId?: string; communityId?: string; macroGroupId?: string; parentId?: string; authorId?: string; sensitive?: '' | 'true' | 'false' } = {}, signal?: AbortSignal): Promise<CatalogResponse> {
+    const revision = await this.pin(signal);
+    const parameters = new URLSearchParams({ limit: '50', sort: options.sort ?? (options.q ? 'relevance' : 'activity') });
+    if (options.q) parameters.set('q', options.q);
+    if (options.type) parameters.set('type', options.type);
+    if (options.cursor) parameters.set('cursor', options.cursor);
+    if (options.entityId) parameters.set('entity_id', options.entityId);
+    if (options.communityId) parameters.set('community_id', options.communityId);
+    if (options.macroGroupId) parameters.set('macro_group_id', options.macroGroupId);
+    if (options.parentId) parameters.set('parent_id', options.parentId);
+    if (options.authorId) parameters.set('author_id', options.authorId);
+    if (options.sensitive) parameters.set('sensitive', options.sensitive);
+    return this.fetchJSON<CatalogResponse>(withRevision(`/graph/catalog?${parameters}`, revision), signal);
+  }
+
+  public async catalogFacets(signal?: AbortSignal): Promise<CatalogFacets> {
+    const revision = await this.pin(signal);
+    return this.fetchJSON<CatalogFacets>(withRevision('/graph/catalog/facets', revision), signal);
+  }
+
+  public async catalogTree(entityId: string, cursor?: string, signal?: AbortSignal): Promise<CatalogTreeResponse> {
+    const revision = await this.pin(signal);
+    const parameters = new URLSearchParams({ limit: '50' });
+    if (cursor) parameters.set('cursor', cursor);
+    return this.fetchJSON<CatalogTreeResponse>(withRevision(`/graph/catalog/tree/${encodeURIComponent(entityId)}?${parameters}`, revision), signal);
   }
 
   public async nodeDetails(entityID: string, neighborLimit = 20, signal?: AbortSignal): Promise<NodeDetails> {

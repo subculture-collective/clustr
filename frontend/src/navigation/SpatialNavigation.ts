@@ -6,8 +6,19 @@ export type SavedViewpoint = { name: string; pose: CameraPose; selectedLandmark?
 export const DEFAULT_CAMERA_POSE: CameraPose = { x: 0, y: 0, z: 500, targetX: 0, targetY: 0, targetZ: 0 };
 const STORAGE_KEY = 'clustr-spatial-viewpoints-v1';
 
-export function poseForTarget(target: { x: number; y: number; z: number }, distance = 180): CameraPose {
-  return { x: target.x + distance, y: target.y + distance * 0.45, z: target.z + distance, targetX: target.x, targetY: target.y, targetZ: target.z };
+export function poseForTarget(
+  target: { x: number; y: number; z: number },
+  options: number | { radius?: number; verticalFovDegrees?: number; minimumDistance?: number; margin?: number } = {},
+): CameraPose {
+  const configured = typeof options === 'number' ? { minimumDistance: options } : options;
+  const radius = Math.max(0, configured.radius ?? 0);
+  const fov = Math.min(120, Math.max(10, configured.verticalFovDegrees ?? 50));
+  const fitDistance = radius > 0 ? radius / Math.tan((fov * Math.PI / 180) / 2) * (configured.margin ?? 1.35) : 0;
+  const distance = Math.max(configured.minimumDistance ?? 180, fitDistance);
+  const direction = { x: .68, y: .31, z: .66 };
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  const stable = (value: number) => Number(value.toFixed(3));
+  return { x: stable(target.x + distance * direction.x / length), y: stable(target.y + distance * direction.y / length), z: stable(target.z + distance * direction.z / length), targetX: target.x, targetY: target.y, targetZ: target.z };
 }
 
 export function headingForPose(pose: CameraPose): number {

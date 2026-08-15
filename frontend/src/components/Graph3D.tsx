@@ -26,6 +26,7 @@ import LoadingProgress from "./LoadingProgress";
 import PerformanceHUD from "./PerformanceHUD";
 import Minimap from "./Minimap";
 import { useTheme } from "../contexts/ThemeContext";
+import { poseForTarget } from "../navigation/SpatialNavigation";
 
 type Filters = {
   subreddit: boolean;
@@ -555,6 +556,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
   const getColor = useMemo(
     () => (node: unknown) => {
       const n = node as GraphNode;
+      if (n.primary_color) return n.primary_color;
       // Use community color if available
       if (communityResult) {
         const commId = communityResult.nodeCommunities.get(n.id);
@@ -592,20 +594,25 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
         n.name?.toLowerCase() === focusNodeId.toLowerCase()
     );
     if (!match) return;
-    const distance = 200;
-    const distRatio = 1 + distance / (match.val || 1);
     const {
       x = 0,
       y = 0,
       z = 0,
     } = match as unknown as { x?: number; y?: number; z?: number };
+    const val = typeof match.val === "number" ? Math.max(1, match.val) : 1;
+    const baseRadius = match.type === "community" ? Math.max(2.5, Math.pow(val, .25))
+      : match.type === "subreddit" ? Math.max(2, Math.pow(val, .35))
+      : match.type === "user" ? Math.max(1.5, Math.pow(val, .5))
+      : match.type === "post" ? 1.4 : 1;
+    const camera = (fgRef.current as unknown as FGApi | undefined)?.camera?.() as THREE.PerspectiveCamera | undefined;
+    const pose = poseForTarget({ x, y, z }, { radius: baseRadius * nodeRelSize, verticalFovDegrees: camera?.fov ?? 50 });
     // cameraPosition available on ForceGraphMethods
     (fgRef.current as unknown as FGApi | undefined)?.cameraPosition?.(
-      { x: x * distRatio, y: y * distRatio, z: z * distRatio },
+      { x: pose.x, y: pose.y, z: pose.z },
       { x, y, z },
       CAMERA_ANIMATION_DURATION_MS
     );
-  }, [focusNodeId, graphData, CAMERA_ANIMATION_DURATION_MS]);
+  }, [focusNodeId, graphData, CAMERA_ANIMATION_DURATION_MS, nodeRelSize]);
 
   // Set initial camera position from URL state
   useEffect(() => {
@@ -1091,7 +1098,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
 
         labelData.push({
           id: node.id,
-          text: node.name || node.id,
+          text: `${node.display_name || node.name || node.id}${node.bridge ? " · BRIDGE" : ""}`,
           position: { x: node.x, y: node.y, z: node.z },
           size,
         });

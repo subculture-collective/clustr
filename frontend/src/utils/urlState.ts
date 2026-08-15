@@ -12,7 +12,7 @@ export interface CameraPosition {
 }
 
 export interface AppState {
-  viewMode?: "3d" | "2d" | "dashboard" | "communities" | "admin";
+  viewMode?: "3d" | "2d" | "dashboard" | "communities" | "catalog" | "admin";
   filters?: TypeFilters;
   minDegree?: number;
   maxDegree?: number;
@@ -35,9 +35,10 @@ export function readStateFromURL(): AppState {
 
   // View mode
   const viewMode = params.get("view");
-  if (viewMode === "3d" || viewMode === "2d" || viewMode === "dashboard" || viewMode === "communities" || viewMode === "admin") {
+  if (viewMode === "3d" || viewMode === "2d" || viewMode === "dashboard" || viewMode === "communities" || viewMode === "catalog" || viewMode === "admin") {
     state.viewMode = viewMode;
   }
+  if (window.location.pathname?.startsWith("/catalog/")) state.viewMode = "catalog";
 
   // Filters
   const filterSr = params.get("f_subreddit");

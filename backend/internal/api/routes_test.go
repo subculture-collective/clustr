@@ -6,7 +6,23 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
 )
+
+func TestCatalogProductionRequiresStrongCursorSecret(t *testing.T) {
+	config.ResetForTest()
+	t.Cleanup(config.ResetForTest)
+	t.Setenv("ENV", "production")
+	t.Setenv("CATALOG_ENABLED", "true")
+	t.Setenv("CATALOG_CURSOR_SECRET", "short")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected production Catalog configuration to fail closed")
+		}
+	}()
+	_ = NewRouter(nil)
+}
 
 func TestPublicAPIHealthAlias(t *testing.T) {
 	router := NewRouter(nil)

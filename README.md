@@ -95,6 +95,7 @@ See the **[Developer Guide](docs/developer-guide.md)** for detailed workflows, t
 - **[Runbooks](docs/runbooks.md)** - Operational procedures: backup/restore, maintenance, troubleshooting
 - **[Production Database Clone](docs/runbooks/production-database-clone.md)** - Snapshot-consistent encrypted Almaz-to-Kvant export, restore, verification, and cleanup
 - **[Almaz + Kvant Launch](docs/runbooks/almaz-kvant-launch.md)** - Clone-qualified calculation and rollback-safe launch procedure
+- **[Affinity World + Catalog v2](docs/runbooks/affinity-catalog-v2.md)** - Shadow build, coordinated promotion, monitoring, sitemap tiers, and atomic rollback
 - **[Monitoring Guide](docs/monitoring.md)** - Metrics, Prometheus, Grafana dashboards, and alerts
 - **[Data Integrity Guide](backend/docs/DATA_INTEGRITY.md)** - Database integrity checks and maintenance
 

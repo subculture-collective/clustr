@@ -49,8 +49,8 @@ describe('Legend', () => {
       />
     );
     
-    expect(screen.getByText('5 communities')).toBeInTheDocument();
-    expect(screen.getByText('Colors by community detection')).toBeInTheDocument();
+    expect(screen.getByText('5 loaded groups')).toBeInTheDocument();
+    expect(screen.getByText(/Hue = macro-group/)).toBeInTheDocument();
     expect(screen.queryByText('Subreddit')).not.toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe('Legend', () => {
       />
     );
     
-    expect(screen.getByText('Communities')).toBeInTheDocument();
+    expect(screen.getByText('Macro-group hue')).toBeInTheDocument();
   });
 
   it('always renders size legend', () => {

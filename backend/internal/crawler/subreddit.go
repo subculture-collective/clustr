@@ -30,17 +30,24 @@ type FetchUserSubredditsConfig struct {
 
 // Post holds relevant post data from the Reddit API
 type Post struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
-	Author     string    `json:"author"`
-	Permalink  string    `json:"permalink"`
-	Score      int       `json:"score"`
-	URL        string    `json:"url"`
-	Flair      string    `json:"link_flair_text"`
-	CreatedUTC float64   `json:"created_utc"`
-	CreatedAt  time.Time `json:"-"`
-	IsSelf     bool      `json:"is_self"`
-	Selftext   string    `json:"selftext"`
+	ID                  string    `json:"id"`
+	Title               string    `json:"title"`
+	Author              string    `json:"author"`
+	Permalink           string    `json:"permalink"`
+	Score               int       `json:"score"`
+	URL                 string    `json:"url"`
+	Flair               string    `json:"link_flair_text"`
+	CreatedUTC          float64   `json:"created_utc"`
+	CreatedAt           time.Time `json:"-"`
+	IsSelf              bool      `json:"is_self"`
+	Selftext            string    `json:"selftext"`
+	Over18              bool      `json:"over_18"`
+	RemovedByCategory   string    `json:"removed_by_category"`
+	CrosspostParent     string    `json:"crosspost_parent"`
+	CrosspostParentList []struct {
+		ID        string `json:"id"`
+		Subreddit string `json:"subreddit"`
+	} `json:"crosspost_parent_list"`
 }
 
 var subredditMentionRegex = regexp.MustCompile(`(?i)/r/([a-zA-Z0-9_]+)`)

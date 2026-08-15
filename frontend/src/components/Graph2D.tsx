@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSpatialWorldClient } from '../contexts/spatialWorld';
 import type { SpatialScene } from '../data/SpatialSceneClient';
 import type { TypeFilters } from '../types/ui';
 import { publishedCommunityColor } from '../utils/publishedCommunities';
+import { useMobileDetect } from '../hooks/useMobileDetect';
 
 type Graph2DProps = {
   filters: TypeFilters;
@@ -60,6 +61,9 @@ export default function Graph2D({
   const [viewBox, setViewBox] = useState<ViewBox>({ x: -100, y: -100, width: 200, height: 200 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeLandmark, setActiveLandmark] = useState<string>('');
+  const landmarkRefs = useRef(new Map<string, SVGCircleElement>());
+  const { isMobile } = useMobileDetect();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -84,7 +88,25 @@ export default function Graph2D({
   const byID = useMemo(() => new Map(scene?.nodes.map(node => [node.id, node]) ?? []), [scene]);
   const labels = useMemo(() => [...(scene?.nodes ?? [])]
     .sort((left, right) => (right.val ?? 0) - (left.val ?? 0) || left.id.localeCompare(right.id))
-    .slice(0, 40), [scene]);
+    .slice(0, isMobile ? 6 : 40), [scene, isMobile]);
+
+  useEffect(() => {
+    if (selectedId && byID.has(selectedId)) setActiveLandmark(selectedId);
+    else if (!activeLandmark && scene?.nodes[0]) setActiveLandmark(scene.nodes[0].id);
+  }, [selectedId, byID, activeLandmark, scene]);
+
+  const moveSpatialFocus = useCallback((fromID: string, key: string) => {
+    const from = byID.get(fromID); if (!from || !scene) return;
+    const horizontal = key === 'ArrowLeft' || key === 'ArrowRight';
+    const sign = key === 'ArrowLeft' || key === 'ArrowUp' ? -1 : 1;
+    const next = scene.nodes.map(node => {
+      const dx = (node.x ?? 0) - (from.x ?? 0); const dy = (node.y ?? 0) - (from.y ?? 0);
+      const primary = horizontal ? dx : dy; const cross = horizontal ? dy : dx;
+      return { node, primary, score: Math.hypot(dx,dy) + Math.abs(cross) * .7 };
+    }).filter(candidate => candidate.node.id !== fromID && candidate.primary * sign > 0)
+      .sort((a,b) => a.score-b.score || a.node.id.localeCompare(b.node.id))[0]?.node;
+    if (!next) return; setActiveLandmark(next.id); landmarkRefs.current.get(next.id)?.focus();
+  }, [byID, scene]);
 
   useEffect(() => {
     if (!focusNodeId || !scene) return;
@@ -120,6 +142,7 @@ export default function Graph2D({
         role="application"
         aria-label="Published community map. Use Tab to move between landmarks and Enter to inspect."
       >
+        <defs>{scene?.nodes.filter(node => node.bridge && node.primary_color && node.secondary_color).map(node => <linearGradient key={`gradient-${node.id}`} id={`bridge-${node.id.replace(/[^a-zA-Z0-9_-]/g,'-')}`} x1="0" x2="1"><stop offset="0" stopColor={node.primary_color}/><stop offset="1" stopColor={node.secondary_color}/></linearGradient>)}</defs>
         <g aria-hidden="true">
           {scene?.links.map(link => {
             const source = byID.get(String(link.source));
@@ -135,17 +158,21 @@ export default function Graph2D({
             <g key={node.id} transform={`translate(${node.x ?? 0} ${node.y ?? 0})`}>
               <circle
                 r={radius}
-                fill={publishedCommunityColor(node.id)}
+                fill={node.bridge && node.primary_color && node.secondary_color ? `url(#bridge-${node.id.replace(/[^a-zA-Z0-9_-]/g,'-')})` : (node.primary_color || publishedCommunityColor(node.id))}
                 stroke={selected ? '#ffffff' : '#030506'}
                 strokeWidth={selected ? 2 : 0.8}
-                tabIndex={0}
+                ref={element => { if (element) landmarkRefs.current.set(node.id,element); else landmarkRefs.current.delete(node.id); }}
+                tabIndex={activeLandmark === node.id ? 0 : -1}
                 role="button"
-                aria-label={`${node.name || node.id}, ${Number(node.val ?? 0).toLocaleString()} entities`}
+                aria-label={`${node.display_name || node.name || node.id}${node.bridge ? ', bridge cluster' : ''}, ${Number(node.val ?? 0).toLocaleString()} entities`}
                 onClick={() => onNodeSelect?.(node.id)}
+                onFocus={() => setActiveLandmark(node.id)}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     onNodeSelect?.(node.id);
+                  } else if (event.key.startsWith('Arrow')) {
+                    event.preventDefault(); moveSpatialFocus(node.id,event.key);
                   }
                 }}
               />
@@ -155,7 +182,7 @@ export default function Graph2D({
         })}
         {showLabels && labels.map(node => (
           <text key={`label-${node.id}`} x={node.x ?? 0} y={(node.y ?? 0) - 7} textAnchor="middle" fill="#eef7f4" stroke="#030506" strokeWidth="1.5" paintOrder="stroke" fontSize={Math.max(4, viewBox.width / 120)} pointerEvents="none">
-            {node.name || node.id}
+            {node.display_name || node.name || node.id}{node.bridge ? ' · BRIDGE' : ''}
           </text>
         ))}
       </svg>

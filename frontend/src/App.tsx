@@ -1,6 +1,7 @@
 import Admin from "./components/Admin";
 import Sidebar from "./components/Sidebar.tsx";
 import Communities from "./components/Communities";
+import Catalog from "./components/Catalog";
 import Dashboard from "./components/Dashboard";
 import Graph2D from "./components/Graph2D";
 import Graph3D from "./components/Graph3D.tsx";
@@ -28,6 +29,7 @@ function readableSelection(id: string): string {
 function App() {
   // Initialize state from URL if available
   const urlState = readStateFromURL();
+  const catalogEnabled = String(import.meta.env.VITE_CATALOG_ENABLED ?? "false").toLowerCase() === "true";
 
   const [filters, setFilters] = useState<TypeFilters>(() => {
     if (urlState.filters) return urlState.filters;
@@ -66,10 +68,10 @@ function App() {
     "subscribers" | "activeUsers" | "contentActivity" | "interSubLinks"
   >("subscribers");
   const [viewMode, setViewMode] = useState<
-    "3d" | "2d" | "dashboard" | "communities" | "admin"
+    "3d" | "2d" | "dashboard" | "communities" | "catalog" | "admin"
   >(() => {
     // Prefer URL state over localStorage
-    if (urlState.viewMode) return urlState.viewMode;
+    if (urlState.viewMode && (urlState.viewMode !== "catalog" || catalogEnabled)) return urlState.viewMode;
     const saved =
       typeof localStorage !== "undefined"
         ? localStorage.getItem("viewMode")
@@ -79,6 +81,7 @@ function App() {
       saved === "3d" ||
       saved === "dashboard" ||
       saved === "communities" ||
+      saved === "catalog" ||
       saved === "admin"
     ) {
       return saved;
@@ -317,7 +320,8 @@ function App() {
           ["2d", "Map"],
           ["dashboard", "Data"],
           ["communities", "Places"],
-        ] as const).map(([mode, label]) => (
+          ["catalog", "Catalog"],
+        ] as const).filter(([mode]) => mode !== "catalog" || catalogEnabled).map(([mode, label]) => (
           <button
             key={mode}
             type="button"
@@ -332,7 +336,7 @@ function App() {
       </nav>
       
       {/* Search bar - visible in all views except admin */}
-      {viewMode !== "admin" && (
+      {viewMode !== "admin" && viewMode !== "catalog" && (
         <div className="fixed left-1/2 top-20 z-40 w-full max-w-xl -translate-x-1/2 px-3 md:top-5 md:max-w-md lg:max-w-xl">
           <SearchBar
             ref={searchInputRef}
@@ -366,6 +370,8 @@ function App() {
               setSelectedId(id);
             }}
           /></section>
+        ) : viewMode === "catalog" ? (
+          <section className="content-view catalog-content-view"><Catalog onLocate={(id) => { setFocusNodeId(id); setSelectedId(id); setViewMode("3d"); }} /></section>
         ) : viewMode === "communities" ? (
         <section className="content-view"><Communities
           onViewMode={(mode: "3d" | "2d") => {

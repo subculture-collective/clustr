@@ -7,6 +7,8 @@ WORKDIR /app
 # as the safe default and make a cross-origin target an explicit image input.
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
+ARG VITE_CATALOG_ENABLED=false
+ENV VITE_CATALOG_ENABLED=${VITE_CATALOG_ENABLED}
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .

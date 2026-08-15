@@ -8,6 +8,15 @@ describe('poseForTarget', () => {
     expect(pose.z).toBeGreaterThan(6);
   });
 
+  it('backs away far enough to contain a large rendered landmark', () => {
+    const small = poseForTarget({ x: 0, y: 0, z: 0 }, { radius: 2, verticalFovDegrees: 50 });
+    const large = poseForTarget({ x: 0, y: 0, z: 0 }, { radius: 400, verticalFovDegrees: 50 });
+    const smallDistance = Math.hypot(small.x, small.y, small.z);
+    const largeDistance = Math.hypot(large.x, large.y, large.z);
+    expect(largeDistance).toBeGreaterThan(smallDistance);
+    expect(largeDistance).toBeGreaterThan(400 / Math.tan((50 * Math.PI / 180) / 2));
+  });
+
   it('round trips the complete camera pose through a URL', () => {
     const pose = poseForTarget({ x: 12, y: -4, z: 6 });
     expect(poseFromURL(poseToURL(pose, new URL('https://clustr.test/')))).toEqual(pose);

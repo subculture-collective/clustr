@@ -30,13 +30,13 @@ func expectPinnedRevision(mock sqlmock.Sqlmock, revision, catalog int64) {
 func TestTelemetryReturnsExactPinnedCatalogMeasurements(t *testing.T) {
 	handler, mock := newRevisionHandlerMock(t)
 	expectPinnedRevision(mock, 41, 73)
-	mock.ExpectQuery("SELECT entity_count,link_count,subreddit_count").WithArgs(int64(73), int64(41)).
+	mock.ExpectQuery("SELECT.*spatial_catalog_entities.*public_entity_suppressions").WithArgs(int64(73), int64(41)).
 		WillReturnRows(sqlmock.NewRows([]string{"entities", "links", "subreddits", "users", "posts", "comments", "communities"}).
 			AddRow(1000, 900, 10, 20, 300, 670, 4))
-	mock.ExpectQuery("FROM spatial_catalog_entities WHERE catalog_id=\\$1 AND type='subreddit'").WithArgs(int64(73), 2).
+	mock.ExpectQuery("FROM spatial_catalog_entities e WHERE catalog_id=\\$1 AND type='subreddit'").WithArgs(int64(73), 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "subscribers", "activity", "users"}).
 			AddRow("subreddit_one", "One", 500, 40, 12))
-	mock.ExpectQuery("FROM spatial_catalog_entities WHERE catalog_id=\\$1 AND type='user'").WithArgs(int64(73), 2).
+	mock.ExpectQuery("FROM spatial_catalog_entities e WHERE catalog_id=\\$1 AND type='user'").WithArgs(int64(73), 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "posts", "comments", "activity", "communities"}).
 			AddRow("user_one", "Reader", 2, 8, 10, 3))
 
@@ -64,11 +64,13 @@ func TestTelemetryReturnsExactPinnedCatalogMeasurements(t *testing.T) {
 func TestCommunitiesPaginatesInStablePublishedOrder(t *testing.T) {
 	handler, mock := newRevisionHandlerMock(t)
 	expectPinnedRevision(mock, 41, 73)
-	mock.ExpectQuery("FROM graph_revision_communities WHERE revision_id=\\$1 AND level=\\$2").
+	mock.ExpectQuery("FROM graph_revision_communities c WHERE revision_id=\\$1 AND level=\\$2").
 		WithArgs(int64(41), 0, 0, 2).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "size", "x", "y", "z"}).
-			AddRow("c:alpha", "Alpha", 100, 1, 2, 3).
-			AddRow("c:beta", "Beta", 90, 4, 5, 6))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "display_name", "evidence_label", "macro", "primary", "secondary", "bridge", "distinctiveness", "confidence", "size", "x", "y", "z"}).
+			AddRow("c:alpha", "Alpha", "Maker Commons", "DIY · woodworking", "m:one", "#68DCFF", "", false, .7, .8, 100, 1, 2, 3).
+			AddRow("c:beta", "Beta", "Game Worlds", "gaming · games", "m:two", "#B6FF62", "", false, .6, .7, 90, 4, 5, 6))
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM graph_revision_communities c").WithArgs(int64(41), 0).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 
 	recorder := httptest.NewRecorder()
 	handler.Communities(recorder, httptest.NewRequest(http.MethodGet, "/api/graph/communities?revision=41&level=0&limit=1", nil))
@@ -80,7 +82,7 @@ func TestCommunitiesPaginatesInStablePublishedOrder(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Communities) != 1 || payload.Communities[0].ID != "c:alpha" || payload.NextCursor == "" {
+	if payload.TotalPublished != 2 || len(payload.Communities) != 1 || payload.Communities[0].ID != "c:alpha" || payload.NextCursor == "" {
 		t.Fatalf("unexpected communities payload: %#v", payload)
 	}
 	token, err := decodeCommunityCatalogCursor(payload.NextCursor)
@@ -95,11 +97,16 @@ func TestCommunitiesPaginatesInStablePublishedOrder(t *testing.T) {
 func TestNodeDetailsResolvesPublishedCommunityIdentity(t *testing.T) {
 	handler, mock := newRevisionHandlerMock(t)
 	expectPinnedRevision(mock, 41, 73)
+	mock.ExpectQuery("SELECT EXISTS.*public_entity_suppressions").WithArgs("c:alpha").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("SELECT id,label,value,type,x,y,z FROM spatial_catalog_entities").WithArgs(int64(73), "c:alpha").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "value", "type", "x", "y", "z"}))
 	mock.ExpectQuery("SELECT community_id,label,size,'community',x,y,z").WithArgs(int64(41), "c:alpha").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "size", "type", "x", "y", "z"}).
 			AddRow("c:alpha", "Alpha", 100, "community", 1, 2, 3))
+	mock.ExpectQuery("SELECT COALESCE\\(display_name,label\\).+representative_members,evidence_metrics").WithArgs(int64(41), "c:alpha").
+		WillReturnRows(sqlmock.NewRows([]string{"display_name", "evidence_label", "macro", "distinctiveness", "confidence", "representatives", "evidence"}).
+			AddRow("Maker Commons", "DIY · woodworking", "m:one", .7, .8, []byte(`["DIY"]`), []byte(`{"signal_composition":{"active_users":0.6}}`)))
 	mock.ExpectQuery("WITH adjacent AS").WithArgs(int64(41), "c:alpha", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "label", "value", "type", "degree"}).
 			AddRow("c:beta", "Beta", "90", "community", 1))

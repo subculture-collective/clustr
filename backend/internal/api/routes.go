@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -22,6 +24,9 @@ func NewRouter(q *db.Queries) *mux.Router {
 
 	// Load configuration
 	cfg := config.Load()
+	if cfg.CatalogEnabled && strings.EqualFold(strings.TrimSpace(os.Getenv("ENV")), "production") && len(os.Getenv("CATALOG_CURSOR_SECRET")) < 32 {
+		panic("CATALOG_CURSOR_SECRET must be at least 32 characters when Catalog is enabled in production")
+	}
 
 	// Initialize LRU cache
 	graphCache, err := cache.NewLRU(cfg.CacheMaxSizeMB, cfg.CacheMaxEntries, cfg.CacheTTL)
@@ -123,6 +128,12 @@ func NewRouter(q *db.Queries) *mux.Router {
 		r.Handle("/api/graph/manifest", middleware.Gzip(http.HandlerFunc(revisionHandler.Manifest))).Methods("GET")
 		r.Handle("/api/graph/telemetry", middleware.Gzip(http.HandlerFunc(revisionHandler.Telemetry))).Methods("GET")
 		r.Handle("/api/graph/communities", middleware.Gzip(http.HandlerFunc(revisionHandler.Communities))).Methods("GET")
+		if cfg.CatalogEnabled {
+			r.Handle("/api/graph/catalog", middleware.Gzip(http.HandlerFunc(revisionHandler.Catalog))).Methods("GET")
+			r.Handle("/api/graph/catalog/facets", middleware.Gzip(http.HandlerFunc(revisionHandler.CatalogFacets))).Methods("GET")
+			r.Handle("/api/graph/catalog/tree/{id}", middleware.Gzip(http.HandlerFunc(revisionHandler.CatalogTree))).Methods("GET")
+			r.Handle("/api/graph/macro-groups", middleware.Gzip(http.HandlerFunc(revisionHandler.MacroGroups))).Methods("GET")
+		}
 		r.Handle("/api/graph/overview", middleware.Gzip(http.HandlerFunc(revisionHandler.Overview))).Methods("GET")
 		r.Handle("/api/graph/region", middleware.Gzip(http.HandlerFunc(revisionHandler.Region))).Methods("GET")
 		r.Handle("/api/graph/community/{stable_id}", middleware.Gzip(http.HandlerFunc(revisionHandler.Community))).Methods("GET")
@@ -130,6 +141,12 @@ func NewRouter(q *db.Queries) *mux.Router {
 		r.Handle("/api/graph/diff", middleware.Gzip(http.HandlerFunc(revisionHandler.Diff))).Methods("GET")
 		r.Handle("/api/search", middleware.Gzip(middleware.ETag(http.HandlerFunc(revisionHandler.Search)))).Methods("GET")
 		r.Handle("/api/nodes/{id}", middleware.Gzip(middleware.ETag(http.HandlerFunc(revisionHandler.NodeDetails)))).Methods("GET")
+	}
+	if q != nil && cfg.CatalogEnabled {
+		catalogPages := handlers.NewCatalogPageHandler(q.DB())
+		r.HandleFunc("/catalog/{type:clusters|subreddits|users|posts|comments}/{id}", catalogPages.Entity).Methods("GET")
+		r.HandleFunc("/sitemap.xml", catalogPages.SitemapIndex).Methods("GET")
+		r.HandleFunc("/sitemaps/{tier:[1-3]}/{shard:[0-9]+}.xml", catalogPages.SitemapShard).Methods("GET")
 	}
 
 	// Compatibility names for the previous mutable tiered graph during rollback.
@@ -233,6 +250,12 @@ func NewRouter(q *db.Queries) *mux.Router {
 	r.Handle("/api/admin/settings", adminOnly(http.HandlerFunc(adminSettings.GetSettings))).Methods("GET")
 	r.Handle("/api/admin/settings", adminOnly(http.HandlerFunc(adminSettings.UpdateSettings))).Methods("PUT")
 	r.Handle("/api/admin/audit-log", adminOnly(http.HandlerFunc(adminSettings.GetAuditLog))).Methods("GET")
+	if q != nil {
+		suppressions := handlers.NewSuppressionHandler(q.DB())
+		r.Handle("/api/admin/suppressions", adminOnly(http.HandlerFunc(suppressions.List))).Methods("GET")
+		r.Handle("/api/admin/suppressions", adminOnly(http.HandlerFunc(suppressions.Create))).Methods("POST")
+		r.Handle("/api/admin/suppressions/restore", adminOnly(http.HandlerFunc(suppressions.Restore))).Methods("POST")
+	}
 
 	// Cache admin endpoints
 	cacheAdmin := handlers.NewCacheAdminHandler(graphCache)

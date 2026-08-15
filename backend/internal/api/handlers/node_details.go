@@ -27,18 +27,31 @@ type NodeDetailsReader interface {
 
 // NodeDetailResponse represents the detailed information about a node.
 type NodeDetailResponse struct {
-	RevisionID int64          `json:"revision_id,omitempty"`
-	CatalogID  int64          `json:"spatial_catalog_id,omitempty"`
-	ID         string         `json:"id"`
-	Name       string         `json:"name"`
-	Val        string         `json:"val"`
-	Type       string         `json:"type,omitempty"`
-	PosX       *float64       `json:"pos_x,omitempty"`
-	PosY       *float64       `json:"pos_y,omitempty"`
-	PosZ       *float64       `json:"pos_z,omitempty"`
-	Degree     int            `json:"degree"`
-	Neighbors  []NeighborInfo `json:"neighbors"`
-	Stats      *NodeStats     `json:"stats,omitempty"`
+	RevisionID            int64             `json:"revision_id,omitempty"`
+	CatalogID             int64             `json:"spatial_catalog_id,omitempty"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Val                   string            `json:"val"`
+	Type                  string            `json:"type,omitempty"`
+	PosX                  *float64          `json:"pos_x,omitempty"`
+	PosY                  *float64          `json:"pos_y,omitempty"`
+	PosZ                  *float64          `json:"pos_z,omitempty"`
+	Degree                int               `json:"degree"`
+	Neighbors             []NeighborInfo    `json:"neighbors"`
+	Stats                 *NodeStats        `json:"stats,omitempty"`
+	Title                 string            `json:"title,omitempty"`
+	Body                  string            `json:"body,omitempty"`
+	Description           string            `json:"description,omitempty"`
+	SourcePermalink       string            `json:"source_permalink,omitempty"`
+	CommunityID           string            `json:"community_id,omitempty"`
+	MacroGroupID          string            `json:"macro_group_id,omitempty"`
+	Distinctiveness       float64           `json:"distinctiveness,omitempty"`
+	AffinityConfidence    float64           `json:"affinity_confidence,omitempty"`
+	SignalComposition     json.RawMessage   `json:"signal_composition,omitempty"`
+	RepresentativeMembers json.RawMessage   `json:"representative_members,omitempty"`
+	Representative        bool              `json:"representative"`
+	Sensitive             bool              `json:"sensitive"`
+	Actions               map[string]string `json:"actions,omitempty"`
 }
 
 // NeighborInfo represents information about a neighboring node.

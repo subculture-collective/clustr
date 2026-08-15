@@ -809,7 +809,9 @@ export default function Graph3DInstanced(props: Props) {
         const nodeData: NodeData[] = filtered.nodes.map(node => {
             // Get color from community or type
             let color: string | undefined;
-            if (communityResult) {
+            if (node.primary_color) {
+                color = node.primary_color;
+            } else if (communityResult) {
                 const commId = communityResult.nodeCommunities.get(node.id);
                 if (commId !== undefined) {
                     const community = communityResult.communities.find(
@@ -880,7 +882,7 @@ export default function Graph3DInstanced(props: Props) {
                 
                 return {
                     id: n.id,
-                    text: n.name || n.id,
+                    text: `${n.display_name || n.name || n.id}${n.bridge ? ' · BRIDGE' : ''}`,
                     position: {
                         x: n.x || 0,
                         y: (n.y || 0) + visualRadius + 7,
@@ -1088,12 +1090,17 @@ export default function Graph3DInstanced(props: Props) {
             matchedNode.id,
         );
         if (position) {
-            const pose = poseForTarget(position);
+            const val = typeof matchedNode.val === 'number' ? Math.max(1, matchedNode.val) : 1;
+            const baseRadius = matchedNode.type === 'community' ? Math.max(2.5, Math.pow(val, .25))
+                : matchedNode.type === 'subreddit' ? Math.max(2, Math.pow(val, .35))
+                : matchedNode.type === 'user' ? Math.max(1.5, Math.pow(val, .5))
+                : matchedNode.type === 'post' ? 1.4 : 1;
+            const pose = poseForTarget(position, { radius: baseRadius * nodeRelSize, verticalFovDegrees: cameraRef.current.fov });
             cameraRef.current.position.set(pose.x, pose.y, pose.z);
             controlsRef.current.target.set(pose.targetX, pose.targetY, pose.targetZ);
             controlsRef.current.update();
         }
-    }, [focusNodeId, filtered]);
+    }, [focusNodeId, filtered, nodeRelSize]);
 
     // Update scene background color when theme changes
     useEffect(() => {

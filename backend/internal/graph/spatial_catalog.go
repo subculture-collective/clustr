@@ -21,6 +21,7 @@ type SpatialCatalogOptions struct {
 	WorkMemMB       int
 	ParallelWorkers int
 	KnownBotNames   []string
+	ShadowOnly      bool
 }
 
 func DefaultSpatialCatalogOptions() SpatialCatalogOptions {
@@ -308,7 +309,10 @@ WHERE COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
 catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
-SELECT $1,'post_'||p.id,COALESCE(NULLIF(left(regexp_replace(p.title,E'[\\n\\r\\t]+',' ','g'),160),''),'Post '||p.id),'post',GREATEST(COALESCE(p.score,0),0),
+SELECT $1,'post_'||p.id,
+ CASE WHEN p.source_sensitive OR p.source_removed OR p.source_deleted THEN 'Post '||p.id
+ ELSE COALESCE(NULLIF(left(regexp_replace(p.title,E'[\\n\\r\\t]+',' ','g'),160),''),'Post '||p.id) END,
+ 'post',GREATEST(COALESCE(p.score,0),0),
  COALESCE(previous.x,subreddit.x + (hashtextextended(p.id,31)%800)/100.0),
  COALESCE(previous.y,subreddit.y + (hashtextextended(p.id,32)%800)/100.0),
  COALESCE(previous.z,subreddit.z + (hashtextextended(p.id,33)%800)/100.0),
@@ -331,7 +335,8 @@ WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
 catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'comment_'||c.id,
- COALESCE(NULLIF(btrim(left(regexp_replace(c.body,E'[\\n\\r\\t]+',' ','g'),160)),''),'Comment '||c.id),
+ CASE WHEN c.source_sensitive OR c.source_removed OR c.source_deleted THEN 'Comment '||c.id
+ ELSE COALESCE(NULLIF(btrim(left(regexp_replace(c.body,E'[\\n\\r\\t]+',' ','g'),160)),''),'Comment '||c.id) END,
  'comment',GREATEST(COALESCE(c.score,0),0),
  COALESCE(previous.x,post.x + (hashtextextended(c.id,41)%200)/100.0),
  COALESCE(previous.y,post.y + (hashtextextended(c.id,42)%200)/100.0),
@@ -351,6 +356,39 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id)`, catalogID, watermark)
 	if err != nil {
 		return failTx("comment_entities", err)
+	}
+
+	// Keep full public text in a separate TOAST-backed table so spatial scans
+	// never touch wide documents. Removed/deleted source text is represented by
+	// an identity-only tombstone; its former contents are never copied.
+	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_documents(
+catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
+administrative_sensitive,content_created_at,content_updated_at,provenance)
+SELECT $1,e.id,e.type,document.title,document.body,document.description,document.permalink,
+ document.sensitive,false,document.created_at,e.source_updated_at,
+ jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',document.text_excluded)
+FROM spatial_catalog_entities e
+LEFT JOIN LATERAL (
+ SELECT NULL::text title,NULL::text body,s.description,NULL::text permalink,false sensitive,
+  s.created_at,false text_excluded
+ FROM subreddits s WHERE e.type='subreddit' AND e.id='subreddit_'||s.id
+ UNION ALL
+ SELECT NULL,NULL,NULL,NULL,false,u.created_at,false
+ FROM users u WHERE e.type='user' AND e.id='user_'||u.id
+ UNION ALL
+ SELECT CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.title END,
+  CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.selftext END,NULL,p.permalink,
+  p.source_sensitive,p.created_at,p.source_removed OR p.source_deleted
+ FROM posts p WHERE e.type='post' AND e.id='post_'||p.id
+ UNION ALL
+ SELECT NULL,CASE WHEN c.source_removed OR c.source_deleted THEN NULL ELSE c.body END,NULL,
+  CASE WHEN p.permalink IS NULL THEN NULL ELSE rtrim(p.permalink,'/')||'/comment/'||c.id END,
+  c.source_sensitive,c.created_at,c.source_removed OR c.source_deleted
+ FROM comments c JOIN posts p ON p.id=c.post_id WHERE e.type='comment' AND e.id='comment_'||c.id
+) document ON true
+WHERE e.catalog_id=$1`, catalogID, watermark)
+	if err != nil {
+		return failTx("catalog_documents", err)
 	}
 
 	logger.InfoContext(ctx, "Spatial entities placed", "catalog_id", catalogID)
@@ -440,7 +478,7 @@ FROM weighted
 		return failTx("subreddit_overlap_projection_cleanup", err)
 	}
 
-	var entities, links, subreddits, users, posts, comments, emptyLabels int64
+	var entities, links, documents, subreddits, users, posts, comments, emptyLabels int64
 	var minX, maxX, minY, maxY, minZ, maxZ float64
 	err = tx.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE type='subreddit'),count(*) FILTER(WHERE type='user'),
 count(*) FILTER(WHERE type='post'),count(*) FILTER(WHERE type='comment'),count(*) FILTER(WHERE btrim(label)=''),
@@ -449,6 +487,9 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 		&entities, &subreddits, &users, &posts, &comments, &emptyLabels, &minX, &maxX, &minY, &maxY, &minZ, &maxZ)
 	if err == nil {
 		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_links WHERE catalog_id=$1`, catalogID).Scan(&links)
+	}
+	if err == nil {
+		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_documents WHERE catalog_id=$1`, catalogID).Scan(&documents)
 	}
 	if err != nil {
 		return failTx("counts", err)
@@ -478,10 +519,10 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 		return failTx("expected_count", err)
 	}
 	expectedEntities := expectedSubreddits + expectedUsers + expectedPosts + expectedComments
-	if entities != expectedEntities || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
+	if entities != expectedEntities || documents != entities || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
 		entities == 0 || links == 0 || emptyLabels != 0 || orphanLinks != 0 || minX == maxX || minY == maxY || minZ == maxZ ||
 		minX < -1e12 || maxX > 1e12 || minY < -1e12 || maxY > 1e12 || minZ < -1e12 || maxZ > 1e12 {
-		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d expected=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, expectedEntities, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
+		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d documents=%d expected=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, documents, expectedEntities, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
 	}
 	_, err = tx.ExecContext(ctx, `WITH metric_values AS (
  SELECT type,
@@ -500,7 +541,7 @@ UPDATE spatial_catalogs SET config=config || jsonb_build_object('normalization_q
 	if err != nil {
 		return failTx("normalization_quantiles", err)
 	}
-	validation := `{"valid":true,"complete_filtered_entity_coverage":true,"finite_coordinates":true,"noncollapsed_bounds":true,"no_orphan_links":true,"semantic_labels":true,"typed_metrics":true}`
+	validation := `{"valid":true,"complete_filtered_entity_coverage":true,"full_text_document_coverage":true,"finite_coordinates":true,"noncollapsed_bounds":true,"no_orphan_links":true,"semantic_labels":true,"typed_metrics":true}`
 	checksumInput := fmt.Sprintf("%d:%s:%d:%d:%d:%d:%d", catalogID, watermark.UTC().Format(time.RFC3339Nano), entities, links, subreddits, users, posts+comments)
 	checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(checksumInput)))
 	_, err = tx.ExecContext(ctx, `UPDATE spatial_catalogs SET status='published',published_at=now(),entity_count=$2,link_count=$3,
@@ -510,9 +551,11 @@ excluded_user_count=$17,excluded_post_count=$18,excluded_comment_count=$19 WHERE
 	if err != nil {
 		return failTx("finalize", err)
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_current(singleton,catalog_id) VALUES(true,$1)
+	if !options.ShadowOnly {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_current(singleton,catalog_id) VALUES(true,$1)
 ON CONFLICT(singleton) DO UPDATE SET catalog_id=EXCLUDED.catalog_id`, catalogID); err != nil {
-		return failTx("promote", err)
+			return failTx("promote", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return failTx("commit", err)
@@ -520,7 +563,7 @@ ON CONFLICT(singleton) DO UPDATE SET catalog_id=EXCLUDED.catalog_id`, catalogID)
 	if err := RetainSpatialCatalogs(ctx, database, options.Retention); err != nil {
 		logger.WarnContext(ctx, "Published spatial catalog but retention cleanup failed", "catalog_id", catalogID, "error", err)
 	}
-	logger.InfoContext(ctx, "Full spatial catalog published", "catalog_id", catalogID, "entities", entities, "links", links)
+	logger.InfoContext(ctx, "Full spatial catalog validated", "catalog_id", catalogID, "entities", entities, "links", links, "shadow_only", options.ShadowOnly)
 	return catalogID, nil
 }
 

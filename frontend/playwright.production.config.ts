@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const productionPort = process.env.PLAYWRIGHT_PORT || '4173';
+const productionURL = `http://127.0.0.1:${productionPort}`;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [['html'], ['list']] : 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: productionURL,
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
   },
@@ -20,8 +23,8 @@ export default defineConfig({
     },
   }],
   webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
+    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${productionPort}`,
+    url: productionURL,
     reuseExistingServer: false,
     timeout: 180_000,
   },

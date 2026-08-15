@@ -59,6 +59,7 @@ type Config struct {
 	PublicationInterval        time.Duration
 	PublicationMaxAge          time.Duration
 	RevisionReadsEnabled       bool
+	CatalogEnabled             bool
 	CrawlerLifecycleEnabled    bool
 	RendererManifestVersion    string
 	// Layout computation settings
@@ -142,6 +143,7 @@ func Load() *Config {
 		PublicationInterval:        durationEnv("PUBLICATION_INTERVAL", time.Hour),
 		PublicationMaxAge:          durationEnv("PUBLICATION_MAX_AGE", 2*time.Hour),
 		RevisionReadsEnabled:       utils.GetEnvAsBool("REVISION_READS_ENABLED", true),
+		CatalogEnabled:             utils.GetEnvAsBool("CATALOG_ENABLED", false),
 		CrawlerLifecycleEnabled:    utils.GetEnvAsBool("CRAWLER_LIFECYCLE_ENABLED", true),
 		RendererManifestVersion:    strings.TrimSpace(os.Getenv("RENDERER_MANIFEST_VERSION")),
 		// Layout computation: sensible defaults for force-directed layout

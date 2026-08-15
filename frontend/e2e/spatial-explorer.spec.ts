@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const world = {
   revision_id: 'rev-42',
   nodes: [
-    { id: 'c:new:c3875a74587b5df7', name: 'Alpha', type: 'community', val: 120, x: -120, y: -60, z: -80 },
+    { id: 'c:alpha', name: 'Alpha', type: 'community', val: 120, x: -120, y: -60, z: -80 },
     { id: 'c:beta', name: 'Beta', type: 'community', val: 95, x: 140, y: -20, z: 40 },
     { id: 'c:gamma', name: 'Gamma', type: 'community', val: 80, x: 10, y: 150, z: 130 },
     { id: 'c:delta', name: 'Delta', type: 'community', val: 65, x: -30, y: -140, z: 170 },
@@ -49,6 +49,21 @@ async function mockSpatialWorld(page: Page) {
         { id: 'c:new:d8909f50aeb05ee6', label: 'HistoryMemes · Minecraft · Overwatch', size: 328, x: 80, y: 90, z: 30 },
       ],
     }),
+  }));
+  await page.route('**/api/graph/catalog/facets**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ revision_id: 'rev-42', spatial_catalog_id: 'catalog-8', exact_total: 2, types: [{ type: 'subreddit', count: 1 }, { type: 'post', count: 1 }], partial: false }),
+  }));
+  await page.route('**/api/graph/catalog/tree/**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ revision_id: 'rev-42', spatial_catalog_id: 'catalog-8', root: { id: 'post_sensitive', type: 'post', label: 'Sensitive field report' }, children: [], returned_count: 0, cross_linked_authors: ['user_reader'], partial: false, stale: false }),
+  }));
+  await page.route('**/api/graph/catalog?**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ revision_id: 'rev-42', spatial_catalog_id: 'catalog-8', returned_count: 2, total_count: 2, applied_filters: {}, partial: false, stale: false, items: [
+      { id: 'subreddit_alpha', type: 'subreddit', label: 'Alpha', description: 'A public community.', value: 100, sensitive: false, updated_at: '2026-08-15', metrics: {}, distinctiveness: .7, affinity_confidence: .8 },
+      { id: 'post_sensitive', type: 'post', label: 'Sensitive field report', body: 'collapsed text', value: 50, sensitive: true, updated_at: '2026-08-15', metrics: {}, distinctiveness: .6, affinity_confidence: .7 },
+    ] }),
   }));
   await page.route('**/api/nodes/**', route => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() || '');
@@ -165,4 +180,28 @@ test('keeps the universe and primary travel controls usable on mobile', async ({
 
   const artifactDirectory = process.env.CLUSTR_VISUAL_DIR;
   if (artifactDirectory) await page.screenshot({ path: `${artifactDirectory}/clustr-observatory-mobile.png`, fullPage: true });
+});
+
+test('keeps Catalog filters, results, detail, and sensitive disclosure coordinated on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSpatialWorld(page);
+  await page.goto('/?view=catalog');
+
+  await expect(page.getByRole('heading', { name: 'Catalog' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Catalog results' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Catalog filters' })).toBeHidden();
+  await page.getByRole('button', { name: /Sensitive field report/ }).click();
+  await expect(page.getByRole('complementary', { name: 'Entity detail' })).toBeVisible();
+  await expect(page.getByText('SENSITIVE CONTENT · COLLAPSED')).toBeVisible();
+  await expect(page.getByText('collapsed text')).toBeHidden();
+  await page.getByRole('button', { name: 'filters' }).click();
+  await expect(page.getByRole('complementary', { name: 'Catalog filters' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Entity detail' })).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.getByRole('complementary', { name: 'Catalog filters' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Catalog results' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Entity detail' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(844);
 });

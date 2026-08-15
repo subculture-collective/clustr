@@ -20,7 +20,7 @@ const (
 	advisoryLockID = int64(0x434c55535452) // "CLUSTR"
 )
 
-const CurrentMigration = "000031_spatial_presentation.up.sql"
+const CurrentMigration = "000032_affinity_catalog_v2.up.sql"
 
 // VerifyCurrent fails closed when a service is launched without the documented
 // migration runner having applied the schema it was compiled against.

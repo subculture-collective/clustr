@@ -20,6 +20,9 @@ type Comment struct {
 	ParentID  string    `json:"parent_id"`
 	Depth     int       `json:"depth"`
 	Score     int       `json:"score"`
+	Sensitive bool      `json:"sensitive"`
+	Removed   bool      `json:"removed"`
+	Deleted   bool      `json:"deleted"`
 }
 
 func CrawlComments(postID string) ([]Comment, error) {
@@ -88,6 +91,7 @@ func parseCommentsWithLimit(children []interface{}, depth int, maxDepth int) []C
 		id, _ := data["id"].(string)
 		parentID, _ := data["parent_id"].(string)
 		if utils.IsValidAuthor(author) && body != "" {
+			over18, _ := data["over_18"].(bool)
 			var created time.Time
 			if createdUTC, ok := data["created_utc"].(float64); ok {
 				created = time.Unix(int64(createdUTC), 0)
@@ -101,6 +105,9 @@ func parseCommentsWithLimit(children []interface{}, depth int, maxDepth int) []C
 				Depth:     depth,
 				ParentID:  parentID,
 				CreatedAt: created,
+				Sensitive: over18,
+				Removed:   body == "[removed]",
+				Deleted:   body == "[deleted]",
 			})
 		}
 		if repliesRaw, ok := data["replies"]; ok {

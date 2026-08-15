@@ -34,6 +34,9 @@ export default defineConfig(({ mode }) => {
     chunkSizeWarningLimit: 1100,
     rollupOptions: {
       output: {
+        entryFileNames: "assets/app.js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: asset => asset.name?.endsWith(".css") ? "assets/app.css" : "assets/[name]-[hash][extname]",
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("/three/") || id.includes("three-stdlib")) return "three";

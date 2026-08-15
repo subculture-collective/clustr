@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -36,13 +37,24 @@ type revisionNode struct {
 	PositionProvenance string          `json:"position_provenance,omitempty"`
 	SourceUpdatedAt    string          `json:"source_updated_at,omitempty"`
 	Metrics            json.RawMessage `json:"metrics,omitempty"`
+	DisplayName        string          `json:"display_name,omitempty"`
+	EvidenceLabel      string          `json:"evidence_label,omitempty"`
+	MacroGroupID       string          `json:"macro_group_id,omitempty"`
+	PrimaryColor       string          `json:"primary_color,omitempty"`
+	SecondaryColor     string          `json:"secondary_color,omitempty"`
+	Bridge             bool            `json:"bridge,omitempty"`
+	Distinctiveness    float64         `json:"distinctiveness,omitempty"`
+	AffinityConfidence float64         `json:"affinity_confidence,omitempty"`
 }
 type revisionLink struct {
-	Source   string `json:"source"`
-	Target   string `json:"target"`
-	Type     string `json:"type"`
-	Directed bool   `json:"directed"`
-	Weight   int64  `json:"weight"`
+	Source            string          `json:"source"`
+	Target            string          `json:"target"`
+	Type              string          `json:"type"`
+	Directed          bool            `json:"directed"`
+	Weight            int64           `json:"weight"`
+	Affinity          float64         `json:"affinity,omitempty"`
+	ObservedEvidence  float64         `json:"observed_evidence,omitempty"`
+	SignalComposition json.RawMessage `json:"signal_composition,omitempty"`
 }
 type scenePayload struct {
 	RevisionID     int64          `json:"revision_id"`
@@ -218,9 +230,14 @@ func (h *RevisionHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 		TopUsers:       []telemetryUser{},
 	}
 	var subreddits, users, posts, comments int64
-	err = h.db.QueryRowContext(r.Context(), `SELECT entity_count,link_count,subreddit_count,user_count,post_count,comment_count,
-(SELECT count(*) FROM graph_revision_communities WHERE revision_id=$2 AND level=0)
-FROM spatial_catalogs WHERE id=$1 AND status='published'`, catalog.Int64, id).Scan(
+	err = h.db.QueryRowContext(r.Context(), `SELECT
+(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
+(SELECT count(*) FROM spatial_catalog_links l WHERE l.catalog_id=$1 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.restored_at IS NULL AND s.entity_id IN (l.source,l.target))),
+(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='subreddit' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
+(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='user' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
+(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='post' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
+(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='comment' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
+(SELECT count(*) FROM graph_revision_communities c WHERE c.revision_id=$2 AND c.level=0 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=c.community_id AND s.restored_at IS NULL))`, catalog.Int64, id).Scan(
 		&out.Totals.Entities, &out.Totals.Links, &subreddits, &users, &posts, &comments, &out.Totals.Communities)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -231,7 +248,8 @@ FROM spatial_catalogs WHERE id=$1 AND status='published'`, catalog.Int64, id).Sc
 	rows, err := h.db.QueryContext(r.Context(), `SELECT id,label,
 COALESCE((metrics->>'subscribers')::bigint,0),COALESCE((metrics->>'activity_count')::bigint,0),
 COALESCE((metrics->>'unique_users')::bigint,0)
-FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='subreddit'
+FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type='subreddit'
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
 ORDER BY COALESCE((metrics->>'subscribers')::bigint,0) DESC,id LIMIT $2`, catalog.Int64, limit)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -254,7 +272,8 @@ ORDER BY COALESCE((metrics->>'subscribers')::bigint,0) DESC,id LIMIT $2`, catalo
 	rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,
 COALESCE((metrics->>'post_count')::bigint,0),COALESCE((metrics->>'comment_count')::bigint,0),
 COALESCE((metrics->>'activity_count')::bigint,0),COALESCE((metrics->>'distinct_communities')::bigint,0)
-FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='user'
+FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type='user'
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
 ORDER BY COALESCE((metrics->>'activity_count')::bigint,0) DESC,id LIMIT $2`, catalog.Int64, limit)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -303,18 +322,27 @@ func encodeCommunityCatalogCursor(token communityCatalogCursor) string {
 }
 
 type publishedCommunity struct {
-	ID    string  `json:"id"`
-	Label string  `json:"label"`
-	Size  int64   `json:"size"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Z     float64 `json:"z"`
+	ID                 string  `json:"id"`
+	Label              string  `json:"label"`
+	DisplayName        string  `json:"display_name"`
+	EvidenceLabel      string  `json:"evidence_label"`
+	MacroGroupID       string  `json:"macro_group_id,omitempty"`
+	PrimaryColor       string  `json:"primary_color,omitempty"`
+	SecondaryColor     string  `json:"secondary_color,omitempty"`
+	Bridge             bool    `json:"bridge"`
+	Distinctiveness    float64 `json:"distinctiveness"`
+	AffinityConfidence float64 `json:"affinity_confidence"`
+	Size               int64   `json:"size"`
+	X                  float64 `json:"x"`
+	Y                  float64 `json:"y"`
+	Z                  float64 `json:"z"`
 }
 
 type publishedCommunitiesPayload struct {
 	RevisionID     int64                `json:"revision_id"`
 	SpatialCatalog int64                `json:"spatial_catalog_id"`
 	Level          int                  `json:"level"`
+	TotalPublished int64                `json:"total_published_landmarks"`
 	Communities    []publishedCommunity `json:"communities"`
 	NextCursor     string               `json:"next_cursor,omitempty"`
 }
@@ -350,8 +378,10 @@ func (h *RevisionHandler) Communities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := namedQueryLimit(r, "limit", 50, 200)
-	rows, err := h.db.QueryContext(r.Context(), `SELECT community_id,label,size,x,y,z
-FROM graph_revision_communities WHERE revision_id=$1 AND level=$2
+	rows, err := h.db.QueryContext(r.Context(), `SELECT community_id,label,COALESCE(display_name,label),COALESCE(evidence_label,label),
+COALESCE(macro_group_id,''),COALESCE(primary_color,''),COALESCE(secondary_color,''),is_bridge,distinctiveness,affinity_confidence,size,x,y,z
+FROM graph_revision_communities c WHERE revision_id=$1 AND level=$2
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=c.community_id AND s.restored_at IS NULL)
 ORDER BY size DESC,community_id OFFSET $3 LIMIT $4`, id, level, token.Offset, limit+1)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -359,9 +389,15 @@ ORDER BY size DESC,community_id OFFSET $3 LIMIT $4`, id, level, token.Offset, li
 	}
 	defer rows.Close()
 	out := publishedCommunitiesPayload{RevisionID: id, SpatialCatalog: catalog.Int64, Level: level, Communities: []publishedCommunity{}}
+	if err := h.db.QueryRowContext(r.Context(), `SELECT count(*) FROM graph_revision_communities c WHERE revision_id=$1 AND level=$2
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=c.community_id AND s.restored_at IS NULL)`, id, level).Scan(&out.TotalPublished); err != nil {
+		writeRevisionError(w, err)
+		return
+	}
 	for rows.Next() {
 		var item publishedCommunity
-		if err := rows.Scan(&item.ID, &item.Label, &item.Size, &item.X, &item.Y, &item.Z); err != nil {
+		if err := rows.Scan(&item.ID, &item.Label, &item.DisplayName, &item.EvidenceLabel, &item.MacroGroupID, &item.PrimaryColor,
+			&item.SecondaryColor, &item.Bridge, &item.Distinctiveness, &item.AffinityConfidence, &item.Size, &item.X, &item.Y, &item.Z); err != nil {
 			writeRevisionError(w, err)
 			return
 		}
@@ -393,13 +429,13 @@ r.layout_algorithm,r.layout_dimensions,COALESCE(c.min_x,r.min_x),COALESCE(c.max_
 COALESCE(c.max_y,r.max_y),COALESCE(c.min_z,r.min_z),COALESCE(c.max_z,r.max_z),COALESCE(c.id,0),
 COALESCE(c.bot_policy_version,''),COALESCE(c.metric_policy_version,''),COALESCE(c.catalog_checksum,''),
 COALESCE(c.excluded_user_count,0),COALESCE(c.excluded_post_count,0),COALESCE(c.excluded_comment_count,0),
-COALESCE(c.config->'normalization_quantiles','{}'::jsonb)
+COALESCE(c.config->'normalization_quantiles','{}'::jsonb),r.scene_contract
 FROM graph_revisions r LEFT JOIN spatial_catalogs c ON c.id=r.spatial_catalog_id AND c.status='published'
 WHERE r.id=$1 AND r.status='published'`, id).Scan(
 		&out.RevisionID, &out.Watermark, &out.Published, &out.Nodes, &out.ResidentNodes, &out.Links, &out.ResidentLinks,
 		&out.Communities, &out.Layout, &out.Dimensions, &minX, &maxX, &minY, &maxY, &minZ, &maxZ, &out.CatalogID,
 		&out.BotPolicyVersion, &out.MetricPolicyVersion, &out.CatalogChecksum, &out.ExcludedUserCount, &out.ExcludedPostCount,
-		&out.ExcludedCommentCount, &quantiles)
+		&out.ExcludedCommentCount, &quantiles, &out.SceneContract)
 	if err != nil {
 		writeRevisionError(w, err)
 		return
@@ -425,7 +461,9 @@ WHERE r.id=$1 AND r.status='published'`, id).Scan(
 		return
 	}
 	out.Formats = []string{"json"}
-	out.SceneContract = "spatial-scene-v1"
+	if out.SceneContract == "" {
+		out.SceneContract = "spatial-scene-v1"
+	}
 	out.NormalizationQuantiles = append(json.RawMessage(nil), quantiles...)
 	writeJSON(w, out)
 }
@@ -459,7 +497,11 @@ func (h *RevisionHandler) Overview(w http.ResponseWriter, r *http.Request) {
 	level, _ := strconv.Atoi(r.URL.Query().Get("level"))
 	limit := queryLimit(r, 300, 2000)
 	linkLimit := namedQueryLimit(r, "max_links", 180, 2000)
-	rows, err := h.db.QueryContext(r.Context(), `SELECT community_id,label,size,x,y,z FROM graph_revision_communities WHERE revision_id=$1 AND level=$2 ORDER BY size DESC,community_id LIMIT $3`, id, level, limit)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT community_id,label,COALESCE(display_name,label),COALESCE(evidence_label,label),
+COALESCE(macro_group_id,''),COALESCE(primary_color,''),COALESCE(secondary_color,''),is_bridge,distinctiveness,affinity_confidence,size,x,y,z
+FROM graph_revision_communities c WHERE revision_id=$1 AND level=$2
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=c.community_id AND s.restored_at IS NULL)
+ORDER BY COALESCE((evidence_metrics->>'overview_rank')::int,2147483647),size DESC,community_id LIMIT $3`, id, level, limit)
 	if err != nil {
 		writeRevisionError(w, err)
 		return
@@ -472,7 +514,8 @@ func (h *RevisionHandler) Overview(w http.ResponseWriter, r *http.Request) {
 	ids := make([]string, 0, limit)
 	for rows.Next() {
 		var n revisionNode
-		if err := rows.Scan(&n.ID, &n.Name, &n.Val, &n.X, &n.Y, &n.Z); err != nil {
+		if err := rows.Scan(&n.ID, &n.Name, &n.DisplayName, &n.EvidenceLabel, &n.MacroGroupID, &n.PrimaryColor,
+			&n.SecondaryColor, &n.Bridge, &n.Distinctiveness, &n.AffinityConfidence, &n.Val, &n.X, &n.Y, &n.Z); err != nil {
 			writeRevisionError(w, err)
 			return
 		}
@@ -485,7 +528,11 @@ func (h *RevisionHandler) Overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(ids) > 0 {
-		linkRows, err := h.db.QueryContext(r.Context(), `SELECT source_community_id,target_community_id,'community_route',false,weight FROM graph_revision_community_links WHERE revision_id=$1 AND source_community_id=ANY($2) AND target_community_id=ANY($2) ORDER BY weight DESC,source_community_id,target_community_id LIMIT $3`, id, stringArray(ids), linkLimit)
+		linkRows, err := h.db.QueryContext(r.Context(), `SELECT source_community_id,target_community_id,'community_route',false,weight,
+COALESCE(affinity,0),observed_evidence,signal_composition FROM graph_revision_community_links l WHERE revision_id=$1
+AND source_community_id=ANY($2) AND target_community_id=ANY($2)
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.restored_at IS NULL AND s.entity_id IN (l.source_community_id,l.target_community_id))
+ORDER BY COALESCE(affinity,0) DESC,weight DESC,source_community_id,target_community_id LIMIT $3`, id, stringArray(ids), linkLimit)
 		if err != nil {
 			writeRevisionError(w, err)
 			return
@@ -493,7 +540,7 @@ func (h *RevisionHandler) Overview(w http.ResponseWriter, r *http.Request) {
 		defer linkRows.Close()
 		for linkRows.Next() {
 			var link revisionLink
-			if err := linkRows.Scan(&link.Source, &link.Target, &link.Type, &link.Directed, &link.Weight); err != nil {
+			if err := linkRows.Scan(&link.Source, &link.Target, &link.Type, &link.Directed, &link.Weight, &link.Affinity, &link.ObservedEvidence, &link.SignalComposition); err != nil {
 				writeRevisionError(w, err)
 				return
 			}
@@ -667,7 +714,9 @@ func (h *RevisionHandler) Region(w http.ResponseWriter, r *http.Request) {
 	if catalog.Valid {
 		columns = "id,label,value,type,x,y,z,COALESCE(parent_id,''),COALESCE(anchor_id,''),COALESCE(author_id,''),COALESCE(community_id,''),position_provenance,source_updated_at::text,metrics"
 	}
-	query := fmt.Sprintf(`SELECT %s FROM %s WHERE %s=$1 AND x BETWEEN $2 AND $5 AND y BETWEEN $3 AND $6 AND z BETWEEN $4 AND $7 AND %s ORDER BY value DESC,id OFFSET $8 LIMIT $9`, columns, table, key, typeFilter)
+	query := fmt.Sprintf(`SELECT %s FROM %s n WHERE n.%s=$1 AND x BETWEEN $2 AND $5 AND y BETWEEN $3 AND $6 AND z BETWEEN $4 AND $7 AND %s
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
+ORDER BY value DESC,id OFFSET $8 LIMIT $9`, columns, table, key, typeFilter)
 	artifactID := id
 	if catalog.Valid {
 		artifactID = catalog.Int64
@@ -779,6 +828,15 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 	if cid == "" {
 		cid = r.URL.Query().Get("community_id")
 	}
+	suppressed, suppressionErr := isSuppressed(h.db, r, cid)
+	if suppressionErr != nil {
+		writeRevisionError(w, suppressionErr)
+		return
+	}
+	if suppressed {
+		http.Error(w, "gone", http.StatusGone)
+		return
+	}
 	limit := queryLimit(r, 5000, 25000)
 	linkLimit := namedQueryLimit(r, "max_links", 20000, 50000)
 	lod := strings.ToLower(r.URL.Query().Get("lod"))
@@ -801,7 +859,8 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 	if useCatalog {
 		var hasMembers bool
 		err = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
-SELECT 1 FROM spatial_catalog_entities WHERE catalog_id=$1 AND community_id=$2
+SELECT 1 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND community_id=$2
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
 )`, catalog.Int64, cid).Scan(&hasMembers)
 		if err != nil {
 			writeRevisionError(w, err)
@@ -812,9 +871,13 @@ SELECT 1 FROM spatial_catalog_entities WHERE catalog_id=$1 AND community_id=$2
 	var rows *sql.Rows
 	if useCatalog {
 		rows, err = h.db.QueryContext(r.Context(), fmt.Sprintf(`SELECT id,label,value,type,x,y,z,COALESCE(parent_id,''),COALESCE(anchor_id,''),COALESCE(author_id,''),COALESCE(community_id,''),position_provenance,source_updated_at::text,metrics FROM spatial_catalog_entities
-WHERE catalog_id=$1 AND community_id=$2 AND %s ORDER BY value DESC,id LIMIT $3`, typeFilter), catalog.Int64, cid, limit)
+WHERE catalog_id=$1 AND community_id=$2 AND %s
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=spatial_catalog_entities.id AND s.restored_at IS NULL)
+ORDER BY value DESC,id LIMIT $3`, typeFilter), catalog.Int64, cid, limit)
 	} else {
-		rows, err = h.db.QueryContext(r.Context(), `SELECT n.id,n.name,n.value,n.type,n.x,n.y,n.z FROM graph_revision_community_members m JOIN graph_revision_nodes n ON n.revision_id=m.revision_id AND n.id=m.node_id WHERE m.revision_id=$1 AND m.community_id=$2 ORDER BY n.value DESC,n.id LIMIT $3`, id, cid, limit)
+		rows, err = h.db.QueryContext(r.Context(), `SELECT n.id,n.name,n.value,n.type,n.x,n.y,n.z FROM graph_revision_community_members m JOIN graph_revision_nodes n ON n.revision_id=m.revision_id AND n.id=m.node_id WHERE m.revision_id=$1 AND m.community_id=$2
+AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
+ORDER BY n.value DESC,n.id LIMIT $3`, id, cid, limit)
 	}
 	if err != nil {
 		writeRevisionError(w, err)
@@ -866,6 +929,15 @@ func (h *RevisionHandler) Entity(w http.ResponseWriter, r *http.Request) {
 		writeRevisionError(w, errors.New("entity id is required"))
 		return
 	}
+	suppressed, suppressionErr := isSuppressed(h.db, r, entityID)
+	if suppressionErr != nil {
+		writeRevisionError(w, suppressionErr)
+		return
+	}
+	if suppressed {
+		http.Error(w, "gone", http.StatusGone)
+		return
+	}
 	expansion, err := parseEntityExpansion(r)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -909,6 +981,7 @@ func (h *RevisionHandler) Entity(w http.ResponseWriter, r *http.Request) {
  SELECT DISTINCT author_id FROM spatial_catalog_entities WHERE catalog_id=$1 AND id IN (SELECT id FROM page) AND author_id IS NOT NULL
 )
 SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
 ORDER BY (n.id=$2) DESC,n.type,n.value DESC,n.id`, columns)
 		args = []any{catalog.Int64, entityID, token.Offset, limit}
 	case "discussion":
@@ -917,6 +990,7 @@ ORDER BY (n.id=$2) DESC,n.type,n.value DESC,n.id`, columns)
  ORDER BY value DESC,id OFFSET $3 LIMIT $4
 ), selected AS (SELECT $2::text id UNION SELECT id FROM page)
 SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
 ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
 		args = []any{catalog.Int64, entityID, token.Offset, limit}
 	case "thread":
@@ -931,6 +1005,7 @@ ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
  WHERE d.depth>0 ORDER BY d.depth,e.value DESC,e.id OFFSET $4 LIMIT $5
 ), selected AS (SELECT $2::text id UNION SELECT id FROM page)
 SELECT %s FROM selected JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
 ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
 		args = []any{catalog.Int64, entityID, expansion.Depth, token.Offset, limit}
 	default:
@@ -953,6 +1028,7 @@ ORDER BY (n.id=$2) DESC,n.value DESC,n.id`, columns)
 )
 SELECT %s FROM selected
 JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=selected.id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
 ORDER BY selected.priority DESC,n.value DESC,n.id`, columns)
 		args = []any{catalog.Int64, entityID, limit}
 	}
@@ -1012,7 +1088,8 @@ func (h *RevisionHandler) Diff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.db.QueryContext(r.Context(), `
-WITH source AS (SELECT id FROM graph_revision_nodes WHERE revision_id=$1), destination AS (SELECT id FROM graph_revision_nodes WHERE revision_id=$2)
+WITH source AS (SELECT id FROM graph_revision_nodes n WHERE revision_id=$1 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)),
+destination AS (SELECT id FROM graph_revision_nodes n WHERE revision_id=$2 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL))
 SELECT COALESCE(source.id,destination.id),CASE WHEN source.id IS NULL THEN 'add' WHEN destination.id IS NULL THEN 'remove' END
 FROM source FULL JOIN destination USING(id) WHERE source.id IS NULL OR destination.id IS NULL ORDER BY 2,1`, from, to)
 	if err != nil {
@@ -1069,10 +1146,12 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if catalog.Valid {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,value::text,type,x,y,z FROM (
   SELECT id,label,value,type,x,y,z,true AS exact_match
-  FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=$2
+  FROM spatial_catalog_entities e WHERE catalog_id=$1 AND id=$2
+   AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
   UNION ALL
   (SELECT id,label,value,type,x,y,z,false AS exact_match
-   FROM spatial_catalog_entities WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
+   FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
+     AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
      AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
    LIMIT $4)
 ) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
@@ -1127,6 +1206,15 @@ func (h *RevisionHandler) NodeDetails(w http.ResponseWriter, r *http.Request) {
 		writeRevisionError(w, errors.New("full spatial catalog is unavailable for this revision"))
 		return
 	}
+	suppressed, suppressionErr := isSuppressed(h.db, r, nodeID)
+	if suppressionErr != nil {
+		writeRevisionError(w, suppressionErr)
+		return
+	}
+	if suppressed {
+		http.Error(w, "gone", http.StatusGone)
+		return
+	}
 	neighborLimit := namedQueryLimit(r, "neighbor_limit", 20, 100)
 	response := NodeDetailResponse{RevisionID: revisionID, CatalogID: catalog.Int64, Neighbors: []NeighborInfo{}}
 	var value int64
@@ -1148,6 +1236,45 @@ FROM graph_revision_communities WHERE revision_id=$1 AND community_id=$2`, revis
 	}
 	response.Val = strconv.FormatInt(value, 10)
 	response.PosX, response.PosY, response.PosZ = &x, &y, &z
+	routeType := response.Type + "s"
+	if response.Type == "community" {
+		routeType = "clusters"
+	}
+	response.Actions = map[string]string{
+		"locate": fmt.Sprintf("/?view=3d&focus=%s", url.QueryEscape(nodeID)),
+		"copy":   fmt.Sprintf("/catalog/%s/%s", routeType, url.PathEscape(nodeID)),
+	}
+	if response.Type == "community" {
+		var evidence []byte
+		err = h.db.QueryRowContext(r.Context(), `SELECT COALESCE(display_name,label),COALESCE(evidence_label,label),COALESCE(macro_group_id,''),distinctiveness,affinity_confidence,representative_members,evidence_metrics FROM graph_revision_communities WHERE revision_id=$1 AND community_id=$2`, revisionID, nodeID).Scan(
+			&response.Title, &response.Description, &response.MacroGroupID, &response.Distinctiveness, &response.AffinityConfidence, &response.RepresentativeMembers, &evidence)
+		response.SignalComposition = append(json.RawMessage(nil), evidence...)
+		response.Actions["open_cluster"] = fmt.Sprintf("/catalog/clusters/%s", url.PathEscape(nodeID))
+	} else {
+		var sourceSensitive, administrativeSensitive bool
+		var representativeMembers, evidence []byte
+		err = h.db.QueryRowContext(r.Context(), `SELECT COALESCE(d.title,''),COALESCE(d.body,''),COALESCE(d.description,''),COALESCE(d.source_permalink,''),
+COALESCE(e.community_id,''),COALESCE(c.macro_group_id,''),COALESCE(c.distinctiveness,0),COALESCE(c.affinity_confidence,0),
+COALESCE(d.source_sensitive,false),COALESCE(d.administrative_sensitive,false),COALESCE(c.representative_members,'[]'::jsonb),COALESCE(c.evidence_metrics,'{}'::jsonb),
+COALESCE(c.representative_members ? e.label,false)
+FROM spatial_catalog_entities e LEFT JOIN spatial_catalog_documents d ON d.catalog_id=e.catalog_id AND d.entity_id=e.id
+LEFT JOIN graph_revision_communities c ON c.revision_id=$2 AND c.community_id=e.community_id WHERE e.catalog_id=$1 AND e.id=$3`, catalog.Int64, revisionID, nodeID).Scan(
+			&response.Title, &response.Body, &response.Description, &response.SourcePermalink, &response.CommunityID, &response.MacroGroupID,
+			&response.Distinctiveness, &response.AffinityConfidence, &sourceSensitive, &administrativeSensitive, &representativeMembers, &evidence, &response.Representative)
+		response.Sensitive = sourceSensitive || administrativeSensitive
+		response.RepresentativeMembers = append(json.RawMessage(nil), representativeMembers...)
+		response.SignalComposition = append(json.RawMessage(nil), evidence...)
+		if response.CommunityID != "" {
+			response.Actions["open_cluster"] = fmt.Sprintf("/catalog/clusters/%s", url.PathEscape(response.CommunityID))
+		}
+		if response.SourcePermalink != "" {
+			response.Actions["source"] = response.SourcePermalink
+		}
+	}
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
 	var rows *sql.Rows
 	if response.Type == "community" {
 		rows, err = h.db.QueryContext(r.Context(), `WITH adjacent AS (
@@ -1159,6 +1286,7 @@ FROM graph_revision_communities WHERE revision_id=$1 AND community_id=$2`, revis
 )
 SELECT n.community_id,n.label,n.size::text,'community',ranked.degree FROM ranked
 JOIN graph_revision_communities n ON n.revision_id=$1 AND n.community_id=ranked.neighbor_id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.community_id AND s.restored_at IS NULL)
 ORDER BY ranked.degree DESC,n.size DESC,n.community_id`, revisionID, nodeID, neighborLimit)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `WITH adjacent AS (
@@ -1177,6 +1305,7 @@ ORDER BY ranked.degree DESC,n.size DESC,n.community_id`, revisionID, nodeID, nei
 )
 SELECT n.id,n.label,n.value::text,n.type,ranked.degree FROM ranked
 JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=ranked.neighbor_id
+WHERE NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=n.id AND s.restored_at IS NULL)
 ORDER BY ranked.degree DESC,n.value DESC,n.id`, catalog.Int64, nodeID, neighborLimit)
 	}
 	if err != nil {

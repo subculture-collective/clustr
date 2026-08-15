@@ -188,12 +188,19 @@ func crawlAndStorePosts(ctx context.Context, q *db.Queries, subredditID int32, p
 			skippedPosts++
 			continue
 		}
-
 		params := ToUpsertPostParams(post, subredditID, user.ID)
 		if err := q.UpsertPost(ctx, params); err != nil {
 			log.Printf("⚠️ Failed to upsert post (ID=%s, Author=%s): %v", post.ID, post.Author, err)
 			skippedPosts++
 		} else {
+			removed := post.RemovedByCategory != "" || post.Selftext == "[removed]"
+			deleted := post.Selftext == "[deleted]"
+			if _, flagErr := q.DB().ExecContext(ctx, `UPDATE posts SET source_sensitive=$2,source_removed=$3,source_deleted=$4 WHERE id=$1`, post.ID, post.Over18, removed, deleted); flagErr != nil {
+				return insertedPosts, fmt.Errorf("persist post source flags: %w", flagErr)
+			}
+			if err := persistPostReferences(ctx, q, subredditID, post); err != nil {
+				return insertedPosts, err
+			}
 			insertedPosts[post.ID] = true
 			insertedCount++
 			metrics.CrawlerPostsProcessed.Inc()
@@ -271,6 +278,7 @@ func crawlAndStoreComments(
 
 			if parentID == "" || strings.HasPrefix(c.ParentID, "t3_") || inserted[parentID] {
 				if err := q.UpsertComment(ctx, params); err == nil {
+					_, _ = q.DB().ExecContext(ctx, `UPDATE comments SET source_sensitive=$2,source_removed=$3,source_deleted=$4 WHERE id=$1`, c.ID, c.Sensitive || post.Over18, c.Removed, c.Deleted)
 					inserted[c.ID] = true
 					insertedThisPost++
 					metrics.CrawlerCommentsProcessed.Inc()
@@ -287,6 +295,8 @@ func crawlAndStoreComments(
 		for id, params := range pending {
 			if inserted[utils.StripPrefix(params.ParentID.String)] {
 				if err := q.UpsertComment(ctx, params); err == nil {
+					comment := findComment(comments, id)
+					_, _ = q.DB().ExecContext(ctx, `UPDATE comments SET source_sensitive=$2,source_removed=$3,source_deleted=$4 WHERE id=$1`, id, comment.Sensitive || post.Over18, comment.Removed, comment.Deleted)
 					inserted[id] = true
 					insertedThisPost++
 					metrics.CrawlerCommentsProcessed.Inc()
@@ -319,6 +329,37 @@ func crawlAndStoreComments(
 	return totalComments - totalSkipped, totalSkipped + threadFailures, nil
 }
 
+func persistPostReferences(ctx context.Context, q *db.Queries, sourceSubredditID int32, post Post) error {
+	if len(post.CrosspostParentList) > 0 {
+		parent := post.CrosspostParentList[0]
+		var targetID sql.NullInt32
+		_ = q.DB().QueryRowContext(ctx, `SELECT id FROM subreddits WHERE lower(name)=lower($1)`, parent.Subreddit).Scan(&targetID)
+		if _, err := q.DB().ExecContext(ctx, `INSERT INTO subreddit_cross_references(source_post_id,source_subreddit_id,target_post_id,target_subreddit_name,target_subreddit_id,relation,observed_at)
+VALUES($1,$2,$3,$4,$5,'crosspost',$6) ON CONFLICT DO NOTHING`, post.ID, sourceSubredditID, parent.ID, parent.Subreddit, targetID, post.CreatedAt); err != nil {
+			return fmt.Errorf("persist crosspost: %w", err)
+		}
+	}
+	for _, match := range subredditMentionRegex.FindAllStringSubmatch(post.Title+"\n"+post.Selftext, -1) {
+		name := match[1]
+		var targetID sql.NullInt32
+		_ = q.DB().QueryRowContext(ctx, `SELECT id FROM subreddits WHERE lower(name)=lower($1)`, name).Scan(&targetID)
+		if _, err := q.DB().ExecContext(ctx, `INSERT INTO subreddit_cross_references(source_post_id,source_subreddit_id,target_post_id,target_subreddit_name,target_subreddit_id,relation,observed_at)
+VALUES($1,$2,$3,$4,$5,'reference',$6) ON CONFLICT DO NOTHING`, post.ID, sourceSubredditID, "subreddit:"+strings.ToLower(name), name, targetID, post.CreatedAt); err != nil {
+			return fmt.Errorf("persist subreddit reference: %w", err)
+		}
+	}
+	return nil
+}
+
+func findComment(comments []Comment, id string) Comment {
+	for _, comment := range comments {
+		if comment.ID == id {
+			return comment
+		}
+	}
+	return Comment{}
+}
+
 func enqueueLinkedSubreddits(ctx context.Context, q *db.Queries, posts []Post) {
 	linked := extractMentionedSubreddits(posts)
 	log.Printf("🔗 Found %d linked subreddits", len(linked))
@@ -335,6 +376,13 @@ func enqueueLinkedSubreddits(ctx context.Context, q *db.Queries, posts []Post) {
 		if err != nil {
 			log.Printf("⚠️ Failed to ensure subreddit %s: %v", sub, err)
 			continue
+		}
+		// A reference may be observed before its target subreddit has ever been
+		// crawled. Resolve those durable identities as soon as discovery creates
+		// the target so the explicit relationship layer is not permanently lost.
+		if _, err := q.DB().ExecContext(ctx, `UPDATE subreddit_cross_references SET target_subreddit_id=$1
+WHERE target_subreddit_id IS NULL AND lower(target_subreddit_name)=lower($2)`, subreddit, sub); err != nil {
+			log.Printf("⚠️ Failed to resolve stored references for %s: %v", sub, err)
 		}
 
 		// Mentions receive a stronger score than author-history evidence, but
