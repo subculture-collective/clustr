@@ -85,8 +85,7 @@ jobs:
 
       - name: Run linter
         working-directory: ./frontend
-        run: npm run lint || echo "Linting skipped - no lint script"
-        continue-on-error: true
+        run: npm run lint
 
       - name: Check for npm vulnerabilities
         working-directory: ./frontend
@@ -135,6 +134,10 @@ jobs:
       - name: Run visual regression tests
         working-directory: ./frontend
         run: npm run test:visual
+
+      - name: Run production-bundle interaction tests
+        working-directory: ./frontend
+        run: npm run test:e2e:production
 
       - name: Upload test report on failure
         if: failure()

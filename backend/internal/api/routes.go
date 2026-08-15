@@ -121,6 +121,8 @@ func NewRouter(q *db.Queries) *mux.Router {
 	if q != nil && cfg.RevisionReadsEnabled { // permits isolated router-security tests that intentionally use no database.
 		revisionHandler := handlers.NewRevisionHandler(q.DB())
 		r.Handle("/api/graph/manifest", middleware.Gzip(http.HandlerFunc(revisionHandler.Manifest))).Methods("GET")
+		r.Handle("/api/graph/telemetry", middleware.Gzip(http.HandlerFunc(revisionHandler.Telemetry))).Methods("GET")
+		r.Handle("/api/graph/communities", middleware.Gzip(http.HandlerFunc(revisionHandler.Communities))).Methods("GET")
 		r.Handle("/api/graph/overview", middleware.Gzip(http.HandlerFunc(revisionHandler.Overview))).Methods("GET")
 		r.Handle("/api/graph/region", middleware.Gzip(http.HandlerFunc(revisionHandler.Region))).Methods("GET")
 		r.Handle("/api/graph/community/{stable_id}", middleware.Gzip(http.HandlerFunc(revisionHandler.Community))).Methods("GET")

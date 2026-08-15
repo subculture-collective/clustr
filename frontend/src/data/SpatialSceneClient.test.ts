@@ -64,6 +64,47 @@ describe('SpatialSceneClient', () => {
     expect(request).toContain('revision=9');
   });
 
+  it('loads telemetry and published communities with the same page revision', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4, totals: { entities: 12 } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4, communities: [], next_cursor: 'next' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new SpatialSceneClient();
+
+    const telemetry = await client.telemetry(12);
+    const communities = await client.communities({ level: 0, limit: 25 });
+
+    expect(telemetry.revision_id).toBe(9);
+    expect(communities.next_cursor).toBe('next');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/graph/telemetry?top_limit=12&revision=9');
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/graph/communities?level=0&limit=25&revision=9');
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/graph/manifest'))).toHaveLength(1);
+  });
+
+  it('pins inspector details to the page revision and catalog', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4, id: 'c:alpha', name: 'Alpha', type: 'community', neighbors: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const details = await new SpatialSceneClient().nodeDetails('c:alpha');
+
+    expect(details.name).toBe('Alpha');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/nodes/c%3Aalpha?neighbor_limit=20&revision=9');
+  });
+
+  it('pins semantic search to the page revision', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, query: 'alpha', count: 0, results: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new SpatialSceneClient().search('alpha');
+
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/search?node=alpha&limit=10&revision=9');
+  });
+
   it('single-flights concurrent manifest pinning and never sends an unpinned slice', async () => {
     let resolveManifest!: (response: Response) => void;
     const manifest = new Promise<Response>(resolve => { resolveManifest = resolve; });

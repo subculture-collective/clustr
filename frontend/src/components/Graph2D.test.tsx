@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
 import Graph2D from './Graph2D';
 
 describe('Graph2D', () => {
@@ -43,6 +44,22 @@ describe('Graph2D', () => {
     );
     // Graph2D renders a div container that will eventually have a canvas
     expect(container.querySelector('div')).toBeTruthy();
+  });
+
+  it('projects the revision-pinned overview without requesting the bulk graph', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 12, spatial_catalog_id: 3 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        revision_id: 12,
+        spatial_catalog_id: 3,
+        nodes: [{ id: 'community_1', name: 'One', type: 'community', val: 10, x: 5, y: 7, z: 9 }],
+        links: [],
+      }), { status: 200 }));
+
+    const { container } = render(<Graph2D filters={mockFilters} linkOpacity={0.5} nodeRelSize={4} physics={mockPhysics} subredditSize="subscribers" />);
+
+    await waitFor(() => expect(container.querySelector('[data-revision="12"]')).toBeTruthy());
+    expect(fetchMock.mock.calls.some(call => String(call[0]).match(/\/graph\?/))).toBe(false);
   });
 
   it('accepts precomputed layout option', () => {

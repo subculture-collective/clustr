@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { SelectedInfo, NodeDetails, NeighborInfo } from "../types/ui";
 import VirtualList from "./VirtualList";
 import { useMobileDetect } from "../hooks/useMobileDetect";
+import { useSpatialWorldClient } from "../contexts/spatialWorld";
 
 interface Props {
   selected?: SelectedInfo;
@@ -18,39 +19,32 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [isVisible, setIsVisible] = useState(false);
   const { isMobile } = useMobileDetect();
+  const spatialWorldClient = useSpatialWorldClient();
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const selectionID = selected?.id;
 
   // Fetch detailed node information when selection changes
   useEffect(() => {
-    if (!selected?.id) {
+    if (!selectionID) {
       setNodeDetails(null);
       setError(null);
       return;
     }
 
     const abortController = new AbortController();
-    const currentSelectionId = selected.id;
+    const currentSelectionId = selectionID;
+    const selection = selectedRef.current;
 
     const fetchNodeDetails = async () => {
       setLoading(true);
       setError(null);
       
       try {
-        const rawApiUrl = import.meta.env.VITE_API_URL || '/api';
-        const apiUrl = rawApiUrl.endsWith('/') && rawApiUrl !== '/' 
-          ? rawApiUrl.slice(0, -1) 
-          : rawApiUrl;
-        const response = await fetch(`${apiUrl}/nodes/${encodeURIComponent(selected.id)}?neighbor_limit=20`, {
-          signal: abortController.signal
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch node details: ${response.statusText}`);
-        }
-        
-        const data: NodeDetails = await response.json();
+        const data: NodeDetails = await spatialWorldClient.nodeDetails(currentSelectionId, 20, abortController.signal);
         
         // Guard against stale responses - only update if this is still the current selection
-        if (currentSelectionId === selected.id) {
+        if (currentSelectionId === selectedRef.current?.id) {
           setNodeDetails(data);
         }
       } catch (err) {
@@ -62,8 +56,8 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
         console.error('Error fetching node details:', err);
         setError(err instanceof Error ? err.message : 'Failed to load node details');
         // Fall back to basic selected info only if it has connections
-        if (selected.degree && selected.degree > 0) {
-          const fallbackNeighbors: NeighborInfo[] = (selected.neighbors || []).map(
+        if (selection?.degree && selection.degree > 0) {
+          const fallbackNeighbors: NeighborInfo[] = (selection.neighbors || []).map(
             (neighbor) => ({
               id: neighbor.id,
               name: neighbor.name || neighbor.id,
@@ -73,12 +67,12 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
             })
           );
           setNodeDetails({
-            ...selected,
+            ...selection,
             neighbors: fallbackNeighbors,
           });
         }
       } finally {
-        if (currentSelectionId === selected.id) {
+        if (currentSelectionId === selectedRef.current?.id) {
           setLoading(false);
         }
       }
@@ -90,7 +84,7 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
     return () => {
       abortController.abort();
     };
-  }, [selected]);
+  }, [selectionID, spatialWorldClient]);
 
   const hasConnectionsCheck = Boolean(
     (typeof selected?.degree === "number" && selected.degree > 0) ||

@@ -56,3 +56,28 @@ func TestEntityExpansionUsesBoundedDiscussionDefaults(t *testing.T) {
 		t.Fatalf("expansion = %#v", got)
 	}
 }
+
+func TestCommunityCursorRoundTripBindsPinnedRevisionAndLevel(t *testing.T) {
+	want := communityCatalogCursor{Revision: 41, Level: 2, Offset: 75}
+
+	got, err := decodeCommunityCatalogCursor(encodeCommunityCatalogCursor(want))
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	if got != want {
+		t.Fatalf("decoded cursor = %#v, want %#v", got, want)
+	}
+}
+
+func TestNodeDetailResponsePublishesPinnedIdentity(t *testing.T) {
+	body, err := json.Marshal(NodeDetailResponse{RevisionID: 41, CatalogID: 73, ID: "c:one", Name: "One", Type: "community", Neighbors: []NeighborInfo{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(body)
+	for _, want := range []string{`"revision_id":41`, `"spatial_catalog_id":73`, `"type":"community"`} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("node details JSON %s does not contain %s", encoded, want)
+		}
+	}
+}

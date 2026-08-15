@@ -176,10 +176,12 @@ describe('Inspector', () => {
       }
     };
 
-    vi.mocked(global.fetch).mockResolvedValueOnce({
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValueOnce({
       ok: true,
       json: async () => mockNodeDetails
-    });
+    } as Response);
 
     render(
       <Inspector
@@ -199,5 +201,21 @@ describe('Inspector', () => {
 
     expect(screen.getByText('Subreddit Info')).toBeInTheDocument();
     expect(screen.getByText('50,000,000')).toBeInTheDocument();
+  });
+
+  it('does not refetch when the same selection is passed as a new object', async () => {
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }))
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ revision_id: 9, spatial_catalog_id: 4, id: 'community_1', name: 'Place One', type: 'community', degree: 1, neighbors: [] }),
+      } as Response);
+    const props = { onClear: vi.fn(), onFocus: vi.fn() };
+    const { rerender } = render(<Inspector {...props} selected={{ id: 'community_1', degree: 1 }} />);
+    await waitFor(() => expect(screen.getByText('Place One')).toBeInTheDocument());
+
+    rerender(<Inspector {...props} selected={{ id: 'community_1', degree: 1 }} />);
+
+    expect(vi.mocked(global.fetch).mock.calls.filter(call => String(call[0]).includes('/nodes/'))).toHaveLength(1);
   });
 });

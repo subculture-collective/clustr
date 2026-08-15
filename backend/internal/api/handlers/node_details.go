@@ -27,16 +27,18 @@ type NodeDetailsReader interface {
 
 // NodeDetailResponse represents the detailed information about a node.
 type NodeDetailResponse struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	Val       string                `json:"val"`
-	Type      string                `json:"type,omitempty"`
-	PosX      *float64              `json:"pos_x,omitempty"`
-	PosY      *float64              `json:"pos_y,omitempty"`
-	PosZ      *float64              `json:"pos_z,omitempty"`
-	Degree    int                   `json:"degree"`
-	Neighbors []NeighborInfo        `json:"neighbors"`
-	Stats     *NodeStats            `json:"stats,omitempty"`
+	RevisionID int64          `json:"revision_id,omitempty"`
+	CatalogID  int64          `json:"spatial_catalog_id,omitempty"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Val        string         `json:"val"`
+	Type       string         `json:"type,omitempty"`
+	PosX       *float64       `json:"pos_x,omitempty"`
+	PosY       *float64       `json:"pos_y,omitempty"`
+	PosZ       *float64       `json:"pos_z,omitempty"`
+	Degree     int            `json:"degree"`
+	Neighbors  []NeighborInfo `json:"neighbors"`
+	Stats      *NodeStats     `json:"stats,omitempty"`
 }
 
 // NeighborInfo represents information about a neighboring node.
@@ -51,10 +53,10 @@ type NeighborInfo struct {
 // NodeStats represents type-specific statistics for a node.
 type NodeStats struct {
 	// Subreddit-specific fields
-	Subscribers  *int32  `json:"subscribers,omitempty"`
-	Title        *string `json:"title,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	
+	Subscribers *int32  `json:"subscribers,omitempty"`
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+
 	// User-specific fields (can be extended later)
 	// Currently we just have basic user info from the users table
 }
@@ -187,7 +189,7 @@ func fetchNodeStats(ctx context.Context, q NodeDetailsReader, nodeType, nodeID, 
 		if err != nil {
 			return nil, err
 		}
-		
+
 		stats := &NodeStats{}
 		if sub.Subscribers.Valid {
 			stats.Subscribers = &sub.Subscribers.Int32
@@ -199,12 +201,12 @@ func fetchNodeStats(ctx context.Context, q NodeDetailsReader, nodeType, nodeID, 
 			stats.Description = &sub.Description.String
 		}
 		return stats, nil
-		
+
 	case "user":
 		// For users, we could fetch activity stats, but for now just return nil
 		// Can be extended later with GetUserTotalActivity, etc.
 		return nil, nil
-		
+
 	default:
 		return nil, nil
 	}

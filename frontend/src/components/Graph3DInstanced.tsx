@@ -21,7 +21,8 @@ import Minimap from './Minimap';
 import { DEFAULT_LOD_CONFIG } from '../utils/levelOfDetail';
 import { useTheme } from '../contexts/ThemeContext';
 import { useMobileDetect, getMobileGraphConfig } from '../hooks/useMobileDetect';
-import { SpatialSceneClient, type SpatialScene } from '../data/SpatialSceneClient';
+import type { SpatialScene } from '../data/SpatialSceneClient';
+import { useSpatialWorldClient } from '../contexts/spatialWorld';
 import { DEFAULT_CAMERA_POSE, poseForTarget, prefersReducedMotion } from '../navigation/SpatialNavigation';
 
 /**
@@ -63,6 +64,7 @@ interface Props {
     focusNodeId?: string;
     selectedId?: string;
     onNodeSelect?: (id?: string) => void;
+    onInspectNode?: (id: string) => void;
     showLabels?: boolean;
     communityResult?: {
         nodeCommunities: Map<string, number>;
@@ -92,6 +94,7 @@ export default function Graph3DInstanced(props: Props) {
         focusNodeId,
         selectedId,
         onNodeSelect,
+        onInspectNode,
         showLabels,
         communityResult,
         usePrecomputedLayout,
@@ -104,6 +107,7 @@ export default function Graph3DInstanced(props: Props) {
     } = props;
 
     const { theme } = useTheme();
+    const spatialWorldClient = useSpatialWorldClient();
     
     // Mobile detection
     const { isMobile, isTablet, isTouchDevice } = useMobileDetect();
@@ -151,7 +155,7 @@ export default function Graph3DInstanced(props: Props) {
     const lastRegionSignatureRef = useRef<string | null>(null);
     const regionAbortRef = useRef<AbortController | null>(null);
     const requestRegionRef = useRef<(camera: THREE.PerspectiveCamera, controls: OrbitControls) => void>(() => undefined);
-    const sceneClientRef = useRef(new SpatialSceneClient());
+    const sceneClientRef = useRef(spatialWorldClient);
     const sceneSourceRef = useRef<SpatialScene['source'] | null>(null);
     const onCameraChangeRef = useRef(onCameraChange);
     const onLODTierChangeRef = useRef(onLODTierChange);
@@ -1055,9 +1059,11 @@ export default function Graph3DInstanced(props: Props) {
             onNodeSelect?.(filtered.nodes[keyboardNodeIndexRef.current].id);
         } else if (event.key === 'Enter') {
             event.preventDefault();
-            onNodeSelect?.(filtered.nodes[keyboardNodeIndexRef.current].id);
+            const id = filtered.nodes[keyboardNodeIndexRef.current].id;
+            onNodeSelect?.(id);
+            onInspectNode?.(id);
         }
-    }, [filtered.nodes, onNodeSelect]);
+    }, [filtered.nodes, onNodeSelect, onInspectNode]);
 
     // Focus camera on node
     useEffect(() => {
@@ -1171,6 +1177,7 @@ export default function Graph3DInstanced(props: Props) {
                 role='application'
                 tabIndex={0}
                 data-visible-node-count={filtered.nodes.length}
+                data-visible-label-count={labelSet.size}
                 data-revision={scene?.revision || 'legacy'}
                 aria-label='Interactive community universe. Drag to orbit, scroll to travel, use left and right arrows to move through visible objects, and Enter to inspect.'
                 onKeyDown={handleSceneKeyDown}

@@ -13,6 +13,7 @@
         "test:run": "vitest run",
         "test:coverage": "vitest run --coverage --maxWorkers=1",
         "test:e2e": "playwright test",
+        "test:e2e:production": "playwright test e2e/spatial-explorer.spec.ts --config=playwright.production.config.ts",
         "test:e2e:ui": "playwright test --ui",
         "test:visual": "playwright test e2e/visual.spec.ts",
         "test:visual:update": "playwright test e2e/visual.spec.ts --update-snapshots",

@@ -164,6 +164,220 @@ type manifestPayload struct {
 	NormalizationQuantiles json.RawMessage    `json:"normalization_quantiles,omitempty"`
 }
 
+type telemetryTotals struct {
+	Entities    int64            `json:"entities"`
+	Links       int64            `json:"links"`
+	Communities int64            `json:"communities"`
+	ByType      map[string]int64 `json:"by_type"`
+}
+
+type telemetrySubreddit struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Subscribers   int64  `json:"subscribers"`
+	ActivityCount int64  `json:"activity_count"`
+	UniqueUsers   int64  `json:"unique_users"`
+}
+
+type telemetryUser struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Posts               int64  `json:"posts"`
+	Comments            int64  `json:"comments"`
+	ActivityCount       int64  `json:"activity_count"`
+	DistinctCommunities int64  `json:"distinct_communities"`
+}
+
+type telemetryPayload struct {
+	RevisionID     int64                `json:"revision_id"`
+	SpatialCatalog int64                `json:"spatial_catalog_id"`
+	Totals         telemetryTotals      `json:"totals"`
+	TopSubreddits  []telemetrySubreddit `json:"top_subreddits"`
+	TopUsers       []telemetryUser      `json:"top_users"`
+}
+
+// Telemetry publishes exact measurements from the immutable catalog pinned by
+// the requested graph revision. It never derives corpus claims from a sample.
+func (h *RevisionHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
+	id, err := h.revision(r)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	catalog, err := h.catalogID(r.Context(), id)
+	if err != nil || !catalog.Valid {
+		writeRevisionError(w, errors.New("published spatial catalog unavailable"))
+		return
+	}
+	limit := namedQueryLimit(r, "top_limit", 20, 100)
+	out := telemetryPayload{
+		RevisionID:     id,
+		SpatialCatalog: catalog.Int64,
+		Totals:         telemetryTotals{ByType: map[string]int64{}},
+		TopSubreddits:  []telemetrySubreddit{},
+		TopUsers:       []telemetryUser{},
+	}
+	var subreddits, users, posts, comments int64
+	err = h.db.QueryRowContext(r.Context(), `SELECT entity_count,link_count,subreddit_count,user_count,post_count,comment_count,
+(SELECT count(*) FROM graph_revision_communities WHERE revision_id=$2 AND level=0)
+FROM spatial_catalogs WHERE id=$1 AND status='published'`, catalog.Int64, id).Scan(
+		&out.Totals.Entities, &out.Totals.Links, &subreddits, &users, &posts, &comments, &out.Totals.Communities)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	out.Totals.ByType = map[string]int64{"subreddit": subreddits, "user": users, "post": posts, "comment": comments}
+
+	rows, err := h.db.QueryContext(r.Context(), `SELECT id,label,
+COALESCE((metrics->>'subscribers')::bigint,0),COALESCE((metrics->>'activity_count')::bigint,0),
+COALESCE((metrics->>'unique_users')::bigint,0)
+FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='subreddit'
+ORDER BY COALESCE((metrics->>'subscribers')::bigint,0) DESC,id LIMIT $2`, catalog.Int64, limit)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	for rows.Next() {
+		var item telemetrySubreddit
+		if err := rows.Scan(&item.ID, &item.Name, &item.Subscribers, &item.ActivityCount, &item.UniqueUsers); err != nil {
+			rows.Close()
+			writeRevisionError(w, err)
+			return
+		}
+		out.TopSubreddits = append(out.TopSubreddits, item)
+	}
+	if err := rows.Close(); err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+
+	rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,
+COALESCE((metrics->>'post_count')::bigint,0),COALESCE((metrics->>'comment_count')::bigint,0),
+COALESCE((metrics->>'activity_count')::bigint,0),COALESCE((metrics->>'distinct_communities')::bigint,0)
+FROM spatial_catalog_entities WHERE catalog_id=$1 AND type='user'
+ORDER BY COALESCE((metrics->>'activity_count')::bigint,0) DESC,id LIMIT $2`, catalog.Int64, limit)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item telemetryUser
+		if err := rows.Scan(&item.ID, &item.Name, &item.Posts, &item.Comments, &item.ActivityCount, &item.DistinctCommunities); err != nil {
+			writeRevisionError(w, err)
+			return
+		}
+		out.TopUsers = append(out.TopUsers, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+type communityCatalogCursor struct {
+	Revision int64 `json:"revision"`
+	Level    int   `json:"level"`
+	Offset   int   `json:"offset"`
+}
+
+func decodeCommunityCatalogCursor(raw string) (communityCatalogCursor, error) {
+	if raw == "" {
+		return communityCatalogCursor{}, nil
+	}
+	body, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return communityCatalogCursor{}, errors.New("invalid community cursor")
+	}
+	var token communityCatalogCursor
+	if json.Unmarshal(body, &token) != nil || token.Offset < 0 || token.Level < 0 {
+		return communityCatalogCursor{}, errors.New("invalid community cursor")
+	}
+	return token, nil
+}
+
+func encodeCommunityCatalogCursor(token communityCatalogCursor) string {
+	body, _ := json.Marshal(token)
+	return base64.RawURLEncoding.EncodeToString(body)
+}
+
+type publishedCommunity struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Size  int64   `json:"size"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	Z     float64 `json:"z"`
+}
+
+type publishedCommunitiesPayload struct {
+	RevisionID     int64                `json:"revision_id"`
+	SpatialCatalog int64                `json:"spatial_catalog_id"`
+	Level          int                  `json:"level"`
+	Communities    []publishedCommunity `json:"communities"`
+	NextCursor     string               `json:"next_cursor,omitempty"`
+}
+
+// Communities returns the published landmarks, not a browser-side
+// recomputation over a partial graph.
+func (h *RevisionHandler) Communities(w http.ResponseWriter, r *http.Request) {
+	id, err := h.revision(r)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	level := 0
+	if rawLevel := r.URL.Query().Get("level"); rawLevel != "" {
+		level, err = strconv.Atoi(rawLevel)
+	}
+	if err != nil || level < 0 {
+		writeRevisionError(w, errors.New("level must be a non-negative integer"))
+		return
+	}
+	token, err := decodeCommunityCatalogCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	if token.Revision != 0 && (token.Revision != id || token.Level != level) {
+		http.Error(w, "community cursor belongs to a different revision or level", http.StatusConflict)
+		return
+	}
+	catalog, err := h.catalogID(r.Context(), id)
+	if err != nil || !catalog.Valid {
+		writeRevisionError(w, errors.New("published spatial catalog unavailable"))
+		return
+	}
+	limit := namedQueryLimit(r, "limit", 50, 200)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT community_id,label,size,x,y,z
+FROM graph_revision_communities WHERE revision_id=$1 AND level=$2
+ORDER BY size DESC,community_id OFFSET $3 LIMIT $4`, id, level, token.Offset, limit+1)
+	if err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	defer rows.Close()
+	out := publishedCommunitiesPayload{RevisionID: id, SpatialCatalog: catalog.Int64, Level: level, Communities: []publishedCommunity{}}
+	for rows.Next() {
+		var item publishedCommunity
+		if err := rows.Scan(&item.ID, &item.Label, &item.Size, &item.X, &item.Y, &item.Z); err != nil {
+			writeRevisionError(w, err)
+			return
+		}
+		out.Communities = append(out.Communities, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeRevisionError(w, err)
+		return
+	}
+	if len(out.Communities) > limit {
+		out.Communities = out.Communities[:limit]
+		out.NextCursor = encodeCommunityCatalogCursor(communityCatalogCursor{Revision: id, Level: level, Offset: token.Offset + limit})
+	}
+	writeJSON(w, out)
+}
+
 func (h *RevisionHandler) Manifest(w http.ResponseWriter, r *http.Request) {
 	id, err := h.revision(r)
 	if err != nil {
@@ -914,14 +1128,19 @@ func (h *RevisionHandler) NodeDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	neighborLimit := namedQueryLimit(r, "neighbor_limit", 20, 100)
-	var response NodeDetailResponse
+	response := NodeDetailResponse{RevisionID: revisionID, CatalogID: catalog.Int64, Neighbors: []NeighborInfo{}}
 	var value int64
 	var x, y, z float64
 	err = h.db.QueryRowContext(r.Context(), `SELECT id,label,value,type,x,y,z FROM spatial_catalog_entities
 WHERE catalog_id=$1 AND id=$2`, catalog.Int64, nodeID).Scan(&response.ID, &response.Name, &value, &response.Type, &x, &y, &z)
 	if errors.Is(err, sql.ErrNoRows) {
-		http.Error(w, "node not found", http.StatusNotFound)
-		return
+		err = h.db.QueryRowContext(r.Context(), `SELECT community_id,label,size,'community',x,y,z
+FROM graph_revision_communities WHERE revision_id=$1 AND community_id=$2`, revisionID, nodeID).Scan(
+			&response.ID, &response.Name, &value, &response.Type, &x, &y, &z)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "node not found", http.StatusNotFound)
+			return
+		}
 	}
 	if err != nil {
 		writeRevisionError(w, err)
@@ -929,7 +1148,20 @@ WHERE catalog_id=$1 AND id=$2`, catalog.Int64, nodeID).Scan(&response.ID, &respo
 	}
 	response.Val = strconv.FormatInt(value, 10)
 	response.PosX, response.PosY, response.PosZ = &x, &y, &z
-	rows, err := h.db.QueryContext(r.Context(), `WITH adjacent AS (
+	var rows *sql.Rows
+	if response.Type == "community" {
+		rows, err = h.db.QueryContext(r.Context(), `WITH adjacent AS (
+ SELECT target_community_id neighbor_id FROM graph_revision_community_links WHERE revision_id=$1 AND source_community_id=$2
+ UNION ALL
+ SELECT source_community_id neighbor_id FROM graph_revision_community_links WHERE revision_id=$1 AND target_community_id=$2
+), ranked AS (
+ SELECT neighbor_id,count(*)::int degree FROM adjacent GROUP BY neighbor_id ORDER BY degree DESC,neighbor_id LIMIT $3
+)
+SELECT n.community_id,n.label,n.size::text,'community',ranked.degree FROM ranked
+JOIN graph_revision_communities n ON n.revision_id=$1 AND n.community_id=ranked.neighbor_id
+ORDER BY ranked.degree DESC,n.size DESC,n.community_id`, revisionID, nodeID, neighborLimit)
+	} else {
+		rows, err = h.db.QueryContext(r.Context(), `WITH adjacent AS (
  SELECT target neighbor_id FROM spatial_catalog_links WHERE catalog_id=$1 AND source=$2
  UNION ALL
  SELECT source neighbor_id FROM spatial_catalog_links WHERE catalog_id=$1 AND target=$2
@@ -946,6 +1178,7 @@ WHERE catalog_id=$1 AND id=$2`, catalog.Int64, nodeID).Scan(&response.ID, &respo
 SELECT n.id,n.label,n.value::text,n.type,ranked.degree FROM ranked
 JOIN spatial_catalog_entities n ON n.catalog_id=$1 AND n.id=ranked.neighbor_id
 ORDER BY ranked.degree DESC,n.value DESC,n.id`, catalog.Int64, nodeID, neighborLimit)
+	}
 	if err != nil {
 		writeRevisionError(w, err)
 		return

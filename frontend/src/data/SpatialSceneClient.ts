@@ -1,4 +1,5 @@
 import type { GraphData, GraphLink, GraphNode } from '../types/graph';
+import type { NodeDetails } from '../types/ui';
 
 /** A stable, revision-pinned slice of the spatial graph. */
 export interface SpatialScene {
@@ -15,6 +16,64 @@ export interface SpatialScene {
 type SpatialGraphData = GraphData & { revision_id?: string | number; spatial_catalog_id?: string | number; next_cursor?: string };
 
 type Manifest = { revision_id?: string | number; revision?: string; current_revision?: string; id?: string; spatial_catalog_id?: string | number };
+
+export interface SpatialTelemetry {
+  revision_id: string | number;
+  spatial_catalog_id: string | number;
+  totals: {
+    entities: number;
+    links: number;
+    communities: number;
+    by_type: Record<'subreddit' | 'user' | 'post' | 'comment', number>;
+  };
+  top_subreddits: Array<{
+    id: string;
+    name: string;
+    subscribers: number;
+    activity_count: number;
+    unique_users: number;
+  }>;
+  top_users: Array<{
+    id: string;
+    name: string;
+    posts: number;
+    comments: number;
+    activity_count: number;
+    distinct_communities: number;
+  }>;
+}
+
+export interface PublishedCommunity {
+  id: string;
+  label: string;
+  size: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface PublishedCommunities {
+  revision_id: string | number;
+  spatial_catalog_id: string | number;
+  level: number;
+  communities: PublishedCommunity[];
+  next_cursor?: string;
+}
+
+export interface SpatialSearchResponse {
+  query: string;
+  count: number;
+  revision_id: string | number;
+  results: Array<{
+    ID: string;
+    Name: string;
+    Val: string;
+    Type: { String: string; Valid: boolean } | null;
+    PosX?: { Float64: number; Valid: boolean } | null;
+    PosY?: { Float64: number; Valid: boolean } | null;
+    PosZ?: { Float64: number; Valid: boolean } | null;
+  }>;
+}
 
 function apiBase(): string {
   return (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
@@ -105,6 +164,53 @@ export class SpatialSceneClient {
       if ((error as Error).message !== 'HTTP 404') throw error;
       return this.load('/graph?max_nodes=300&max_links=180&with_positions=true', 'legacy', signal);
     }
+  }
+
+  public async telemetry(topLimit = 20, signal?: AbortSignal): Promise<SpatialTelemetry> {
+    const revision = await this.pin(signal);
+    return this.fetchJSON<SpatialTelemetry>(
+      withRevision(`/graph/telemetry?top_limit=${Math.max(1, Math.min(100, Math.trunc(topLimit)))}`, revision),
+      signal,
+    );
+  }
+
+  public async communities(
+    options: { level?: number; limit?: number; cursor?: string } = {},
+    signal?: AbortSignal,
+  ): Promise<PublishedCommunities> {
+    const revision = await this.pin(signal);
+    const parameters = new URLSearchParams({
+      level: String(options.level ?? 0),
+      limit: String(Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50)))),
+    });
+    if (options.cursor) parameters.set('cursor', options.cursor);
+    return this.fetchJSON<PublishedCommunities>(
+      withRevision(`/graph/communities?${parameters}`, revision),
+      signal,
+    );
+  }
+
+  public async nodeDetails(entityID: string, neighborLimit = 20, signal?: AbortSignal): Promise<NodeDetails> {
+    const revision = await this.pin(signal);
+    const data = await this.fetchJSON<NodeDetails>(
+      withRevision(`/nodes/${encodeURIComponent(entityID)}?neighbor_limit=${Math.max(1, Math.min(100, Math.trunc(neighborLimit)))}`, revision),
+      signal,
+    );
+    if (revision && data.revision_id !== undefined && String(data.revision_id) !== revision) {
+      throw new Error('Mixed graph revision response');
+    }
+    if (this.catalog && data.spatial_catalog_id !== undefined && String(data.spatial_catalog_id) !== this.catalog) {
+      throw new Error('Mixed spatial catalog response');
+    }
+    return data;
+  }
+
+  public async search(query: string, limit = 10, signal?: AbortSignal): Promise<SpatialSearchResponse> {
+    const revision = await this.pin(signal);
+    const parameters = new URLSearchParams({ node: query, limit: String(Math.max(1, Math.min(500, Math.trunc(limit)))) });
+    const data = await this.fetchJSON<SpatialSearchResponse>(withRevision(`/search?${parameters}`, revision), signal);
+    if (revision && String(data.revision_id) !== revision) throw new Error('Mixed graph revision response');
+    return data;
   }
 
   public region(bounds: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number }, signal?: AbortSignal): Promise<SpatialScene> {

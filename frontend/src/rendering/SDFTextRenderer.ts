@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { Text } from 'troika-three-text';
+import { Text, configureTextBuilder } from 'troika-three-text';
+
+// Clustr serves a bounded local font and CSP intentionally disallows Troika's
+// worker/bootstrap path. Configure this before the first glyph request.
+configureTextBuilder({ useWorker: false });
 
 /**
  * SDFTextRenderer - High-performance text rendering using Signed Distance Fields (SDF)

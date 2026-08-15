@@ -1,0 +1,17 @@
+{
+  "name": "Clustr — Community Universe",
+  "short_name": "Clustr",
+  "description": "Explore a living spatial map of online communities and the relationships between them.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030506",
+  "theme_color": "#030506",
+  "icons": [
+    {
+      "src": "/clustr.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

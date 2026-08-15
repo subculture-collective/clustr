@@ -1,442 +1,117 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import type { GraphData } from "../types/graph";
-import {
-  detectCommunities,
-  type CommunityResult,
-} from "../utils/communityDetection";
-import VirtualList from "./VirtualList";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSpatialWorldClient } from '../contexts/spatialWorld';
+import type { PublishedCommunity } from '../data/SpatialSceneClient';
+import type { CommunityResult } from '../utils/communityDetection';
+import { publishedCommunityColor, publishedCommunityNumericID } from '../utils/publishedCommunities';
 
 type CommunitiesProps = {
-  onViewMode?: (mode: "3d" | "2d") => void;
+  onViewMode?: (mode: '3d' | '2d') => void;
   onFocusNode?: (id: string) => void;
   onApplyCommunityColors?: (result: CommunityResult) => void;
 };
 
-export default function Communities({
-  onViewMode,
-  onFocusNode,
-  onApplyCommunityColors,
-}: CommunitiesProps) {
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
+function colorResult(communities: PublishedCommunity[]): CommunityResult {
+  const published = communities.map(community => {
+    const id = publishedCommunityNumericID(community.id);
+    return {
+      id,
+      nodes: [community.id],
+      size: community.size,
+      color: publishedCommunityColor(community.id),
+      label: community.label,
+      topNodes: [{ id: community.id, name: community.label, degree: 0 }],
+    };
+  });
+  return {
+    communities: published,
+    nodeCommunities: new Map(published.map(item => [item.nodes[0], item.id])),
+    modularity: 0,
+  };
+}
+
+export default function Communities({ onViewMode, onFocusNode, onApplyCommunityColors }: CommunitiesProps) {
+  const client = useSpatialWorldClient();
+  const [communities, setCommunities] = useState<PublishedCommunity[]>([]);
+  const [revision, setRevision] = useState<string | number | null>(null);
+  const [catalog, setCatalog] = useState<string | number | null>(null);
+  const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [communityResult, setCommunityResult] = useState<CommunityResult | null>(null);
-  const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null);
-  const [computing, setComputing] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initialLoad = useRef(true);
 
-  const computeCommunities = useCallback(
-    (data: GraphData) => {
-      setComputing(true);
-
-      // Clear any existing timeout to prevent state updates from previous calls
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      // Use setTimeout to allow UI to update
-      timeoutRef.current = setTimeout(() => {
-        const result = detectCommunities(data);
-        setCommunityResult(result);
-        setComputing(false);
-
-        // Notify parent to apply colors
-        onApplyCommunityColors?.(result);
-      }, 100);
-    },
-    [onApplyCommunityColors]
-  );
-
-  const loadGraph = useCallback(async () => {
-    if (initialLoad.current) {
-      setLoading(true);
-    }
+  const load = useCallback(async (nextCursor?: string, signal?: AbortSignal) => {
+    setLoading(true);
     setError(null);
     try {
-      const base = (import.meta.env?.VITE_API_URL || "/api").replace(/\/$/, "");
-      const response = await fetch(`${base}/graph?max_nodes=50000&max_links=100000`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = (await response.json()) as GraphData;
-      setGraphData(data);
-
-      // Auto-compute communities on load
-      if (data.nodes.length > 0) {
-        computeCommunities(data);
-      }
-    } catch (err) {
-      setError((err as Error).message);
+      const page = await client.communities({ level: 0, limit: 50, cursor: nextCursor }, signal);
+      setRevision(page.revision_id);
+      setCatalog(page.spatial_catalog_id);
+      setCommunities(current => nextCursor ? [...current, ...page.communities] : page.communities);
+      setCursor(page.next_cursor);
+    } catch (caught) {
+      if ((caught as Error).name !== 'AbortError') setError((caught as Error).message);
     } finally {
-      if (initialLoad.current) {
-        setLoading(false);
-        initialLoad.current = false;
-      }
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [computeCommunities]);
+  }, [client]);
 
   useEffect(() => {
-    // Only fetch once on mount
-    loadGraph();
-    // Cleanup timeout on unmount
-    return () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const controller = new AbortController();
+    void load(undefined, controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
-  // Cleanup timeout on unmount
+  const colors = useMemo(() => colorResult(communities), [communities]);
   useEffect(() => {
-    return () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, []);
+    if (communities.length) onApplyCommunityColors?.(colors);
+  }, [colors, communities.length, onApplyCommunityColors]);
 
-  const handleRecompute = () => {
-    if (graphData) {
-      computeCommunities(graphData);
-    }
-  };
-
-  const formatNumber = (n: number) => {
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return n.toString();
-  };
-
-  const stats = useMemo(() => {
-    if (!communityResult || !graphData) return null;
-
-    const avgSize =
-      communityResult.communities.reduce((sum, c) => sum + c.size, 0) /
-      communityResult.communities.length;
-
-    const largestCommunity = communityResult.communities[0]; // Already sorted by size
-    const smallestCommunity =
-      communityResult.communities[communityResult.communities.length - 1];
-
-    // Calculate inter-community links
-    let interCommunityLinks = 0;
-    for (const link of graphData.links) {
-      const sourceCommunity = communityResult.nodeCommunities.get(link.source);
-      const targetCommunity = communityResult.nodeCommunities.get(link.target);
-      if (
-        sourceCommunity !== undefined &&
-        targetCommunity !== undefined &&
-        sourceCommunity !== targetCommunity
-      ) {
-        interCommunityLinks++;
-      }
-    }
-
-    return {
-      avgSize,
-      largestCommunity,
-      smallestCommunity,
-      interCommunityLinks,
-      intraCommunityLinks: graphData.links.length - interCommunityLinks,
-    };
-  }, [communityResult, graphData]);
-
-  if (loading) {
-    return (
-      <div className="w-full h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-xl">Loading graph data...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-full h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-red-400">Error: {error}</div>
-      </div>
-    );
-  }
-
-  if (!graphData || !communityResult) {
-    return (
-      <div className="w-full h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-xl">
-          {computing ? "Computing communities..." : "No data available"}
-        </div>
-      </div>
-    );
-  }
-
-  const selectedCommunityData =
-    selectedCommunity !== null
-      ? communityResult.communities.find((c) => c.id === selectedCommunity)
-      : null;
+  if (loading && communities.length === 0) return <div className="flex min-h-[60vh] items-center justify-center" role="status">Reading published landmarks…</div>;
+  if (error && communities.length === 0) return <div className="flex min-h-[60vh] items-center justify-center text-red-300" role="alert">Unable to load places: {error}</div>;
 
   return (
-    <div className="w-full h-screen bg-gray-900 text-white overflow-auto p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
+    <div className="w-full px-4 text-white sm:px-6">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="instrument-label mb-3">Places / Calculated structure</p>
+            <p className="instrument-label mb-3">Places / Published structure</p>
             <h1 className="text-3xl font-bold">Community landmarks</h1>
-            <p className="text-gray-400 mt-2">
-              Weighted partition · modularity:{" "}
-              {communityResult.modularity.toFixed(4)}
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
+              Stable places from revision {revision}, catalog {catalog}. These are the same landmarks shown in Universe and Map.
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleRecompute}
-              disabled={computing}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 rounded"
-            >
-              {computing ? "Computing..." : "Recompute"}
-            </button>
-            <button
-              onClick={() => onViewMode?.("3d")}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
-            >
-              View 3D Graph
-            </button>
-            <button
-              onClick={() => onViewMode?.("2d")}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
-            >
-              View 2D Graph
-            </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => onViewMode?.('3d')} className="instrument-button rounded-full border-white/15 px-4 text-xs">Universe</button>
+            <button onClick={() => onViewMode?.('2d')} className="instrument-button rounded-full border-white/15 px-4 text-xs">Map</button>
           </div>
-        </div>
+        </header>
 
-        {/* Overview Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Total Communities</div>
-            <div className="text-3xl font-bold">
-              {communityResult.communities.length}
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Average Size</div>
-            <div className="text-3xl font-bold">
-              {stats?.avgSize.toFixed(1)}
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">Modularity Score</div>
-            <div className="text-3xl font-bold">
-              {communityResult.modularity.toFixed(3)}
-            </div>
-            <div className="text-xs text-gray-400 mt-1">
-              (higher = better separation)
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="text-gray-400 text-sm mb-2">
-              Inter-Community Links
-            </div>
-            <div className="text-3xl font-bold">
-              {formatNumber(stats?.interCommunityLinks || 0)}
-            </div>
-          </div>
-        </div>
-
-        {/* Community Size Distribution */}
-        <div className="bg-gray-800 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">
-            Community Size Distribution
-          </h2>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Largest community:</span>
-              <span className="font-semibold">
-                {stats?.largestCommunity.size} nodes (
-                {stats?.largestCommunity.label})
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span>Smallest community:</span>
-              <span className="font-semibold">
-                {stats?.smallestCommunity.size} nodes (
-                {stats?.smallestCommunity.label})
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span>Intra-community links:</span>
-              <span className="font-semibold">
-                {formatNumber(stats?.intraCommunityLinks || 0)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Communities List */}
-        <div className="bg-gray-800 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">
-            All Communities ({communityResult.communities.length})
-          </h2>
-          <VirtualList
-            items={communityResult.communities}
-            itemKey={(community) => String(community.id)}
-            itemHeight={160}
-            containerHeight={600}
-            renderItem={(community) => (
-              <div
-                className={`p-4 rounded-lg border-2 cursor-pointer transition-all mb-4 ${
-                  selectedCommunity === community.id
-                    ? "border-white bg-gray-700"
-                    : "border-gray-700 bg-gray-750 hover:border-gray-600"
-                }`}
-                style={{
-                  borderLeftWidth: "6px",
-                  borderLeftColor: community.color,
-                }}
-                onClick={() => setSelectedCommunity(community.id)}
+        <p className="mb-4 font-mono text-xs text-gray-400">{communities.length} landmark{communities.length === 1 ? '' : 's'} loaded</p>
+        <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {communities.map(community => (
+            <li key={community.id}>
+              <button
+                className="group flex min-h-32 w-full items-start gap-4 rounded-2xl border border-white/10 bg-gray-800 p-5 text-left hover:border-white/25 hover:bg-gray-700"
+                onClick={() => { onFocusNode?.(community.id); onViewMode?.('3d'); }}
               >
-                <div className="flex items-center gap-3 mb-2">
-                  <div
-                    className="w-4 h-4 rounded"
-                    style={{ backgroundColor: community.color }}
-                  />
-                  <div className="font-semibold truncate flex-1">
-                    {community.label}
-                  </div>
-                </div>
-                <div className="text-2xl font-bold mb-1">{community.size}</div>
-                <div className="text-xs text-gray-400">
-                  {((community.size / graphData.nodes.length) * 100).toFixed(1)}
-                  % of nodes
-                </div>
-                {community.topNodes && community.topNodes.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-600">
-                    <div className="text-xs text-gray-400 mb-1">Top nodes:</div>
-                    <div className="space-y-1">
-                      {community.topNodes.slice(0, 3).map((node) => (
-                        <div
-                          key={node.id}
-                          className="text-xs truncate hover:text-blue-400 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onFocusNode?.(node.name);
-                            onViewMode?.("3d");
-                          }}
-                        >
-                          {node.name} ({node.degree})
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          />
+                <span className="mt-1 h-4 w-4 shrink-0 rounded-full" style={{ background: publishedCommunityColor(community.id) }} aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block truncate text-lg font-semibold">{community.label}</span>
+                  <span className="mt-2 block text-sm text-gray-400">{community.size.toLocaleString()} resident entities</span>
+                  <span className="mt-4 block font-mono text-[10px] text-gray-500">{community.id}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
 
-          {/* Selected Community Details */}
-          {selectedCommunityData && (
-            <div className="bg-gray-800 rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-6 h-6 rounded"
-                    style={{ backgroundColor: selectedCommunityData.color }}
-                  />
-                  <h2 className="text-xl font-semibold">
-                    {selectedCommunityData.label}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setSelectedCommunity(null)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div>
-                  <div className="text-gray-400 text-sm">Community Size</div>
-                  <div className="text-2xl font-bold">
-                    {selectedCommunityData.size}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Percentage</div>
-                  <div className="text-2xl font-bold">
-                    {(
-                      (selectedCommunityData.size / graphData.nodes.length) *
-                      100
-                    ).toFixed(1)}
-                    %
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Rank by Size</div>
-                  <div className="text-2xl font-bold">
-                    #
-                    {communityResult.communities.findIndex(
-                      (c) => c.id === selectedCommunityData.id
-                    ) + 1}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-semibold mb-3">
-                  Top Nodes ({selectedCommunityData.topNodes?.length || 0})
-                </h3>
-                <VirtualList
-                  items={selectedCommunityData.topNodes || []}
-                  itemKey={(node, i) => String(node.id ?? i)}
-                  itemHeight={64}
-                  containerHeight={400}
-                  renderItem={(node, i) => (
-                    <div
-                      className="flex items-center justify-between p-3 bg-gray-700 rounded hover:bg-gray-600 cursor-pointer mb-2"
-                      onClick={() => {
-                        onFocusNode?.(node.name);
-                        onViewMode?.("3d");
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="text-gray-400 w-6">#{i + 1}</div>
-                        <div className="font-medium">{node.name}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold">{node.degree}</div>
-                        <div className="text-xs text-gray-400">connections</div>
-                      </div>
-                    </div>
-                  )}
-                />
-              </div>
-
-              <div className="mt-6 flex gap-2">
-                <button
-                  onClick={() => {
-                    onViewMode?.("3d");
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
-                >
-                  View in 3D Graph
-                </button>
-                <button
-                  onClick={() => {
-                    onViewMode?.("2d");
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
-                >
-                  View in 2D Graph
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-8 text-center text-gray-400 text-sm">
-            <p>Communities detected using the Louvain algorithm</p>
-            <p className="mt-1">
-              Colors are automatically assigned to maximize visual distinction
-            </p>
+        {cursor && (
+          <div className="mt-6 flex justify-center">
+            <button disabled={loading} onClick={() => void load(cursor)} className="instrument-button rounded-full border-white/15 px-5 text-xs">
+              {loading ? 'Loading…' : 'Load more landmarks'}
+            </button>
           </div>
-        </div>
+        )}
+        {error && <p className="mt-4 text-center text-sm text-red-300" role="alert">Unable to load more landmarks: {error}</p>}
       </div>
     </div>
   );

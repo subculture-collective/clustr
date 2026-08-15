@@ -35,9 +35,22 @@ async function mockGraphAPI(page: Page, fixtureName: string) {
   
   await page.route(/\/api\/graph(?:\/|\?|$)/, async (route) => {
     const requestUrl = new URL(route.request().url());
+    const byType = fixtureData.nodes.reduce((counts: Record<string, number>, node: { type?: string }) => {
+      const type = node.type || 'unknown';
+      counts[type] = (counts[type] || 0) + 1;
+      return counts;
+    }, {});
     const body = requestUrl.pathname.endsWith('/manifest')
       ? { revision_id: revision, spatial_catalog_id: catalog }
-      : { ...fixtureData, revision_id: revision, spatial_catalog_id: catalog };
+      : requestUrl.pathname.endsWith('/telemetry')
+        ? {
+            revision_id: revision,
+            spatial_catalog_id: catalog,
+            totals: { entities: fixtureData.nodes.length, links: fixtureData.links.length, communities: byType.community || 0, by_type: byType },
+            top_subreddits: fixtureData.nodes.filter((node: { type?: string }) => node.type === 'subreddit').slice(0, 10).map((node: { id: string; name: string; val?: number }) => ({ id: node.id, name: node.name, subscribers: node.val || 0, activity_count: 0, unique_users: 0 })),
+            top_users: fixtureData.nodes.filter((node: { type?: string }) => node.type === 'user').slice(0, 10).map((node: { id: string; name: string; val?: number }) => ({ id: node.id, name: node.name, posts: 0, comments: node.val || 0, activity_count: node.val || 0, distinct_communities: 0 })),
+          }
+        : { ...fixtureData, revision_id: revision, spatial_catalog_id: catalog };
 
     await route.fulfill({
       status: 200,

@@ -18,12 +18,43 @@ const world = {
 async function mockSpatialWorld(page: Page) {
   await page.route('**/api/graph/manifest', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ revision_id: 'rev-42', bounds: { min_x: -150, max_x: 150, min_y: -150, max_y: 160, min_z: -100, max_z: 180 } }),
+    body: JSON.stringify({ revision_id: 'rev-42', spatial_catalog_id: 'catalog-8', bounds: { min_x: -150, max_x: 150, min_y: -150, max_y: 160, min_z: -100, max_z: 180 } }),
   }));
   await page.route('**/api/graph/overview**', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify(world),
   }));
+  await page.route('**/api/graph/community/**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ ...world, spatial_catalog_id: 'catalog-8' }),
+  }));
+  await page.route('**/api/graph/telemetry**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      revision_id: 'rev-42',
+      spatial_catalog_id: 'catalog-8',
+      totals: { entities: 7_066_559, links: 4_693_401, communities: 4, by_type: { subreddit: 100, user: 1_000, post: 50_000, comment: 7_015_459 } },
+      top_subreddits: [{ id: 'subreddit_alpha', name: 'Alpha', subscribers: 500_000, activity_count: 100, unique_users: 40 }],
+      top_users: [{ id: 'user_reader', name: 'Reader', posts: 2, comments: 8, activity_count: 10, distinct_communities: 3 }],
+    }),
+  }));
+  await page.route('**/api/graph/communities**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      revision_id: 'rev-42',
+      spatial_catalog_id: 'catalog-8',
+      level: 0,
+      communities: world.nodes.map(node => ({ id: node.id, label: node.name, size: node.val, x: node.x, y: node.y, z: node.z })),
+    }),
+  }));
+  await page.route('**/api/nodes/**', route => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() || '');
+    const node = world.nodes.find(candidate => candidate.id === id) || world.nodes[0];
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ revision_id: 'rev-42', spatial_catalog_id: 'catalog-8', id: node.id, name: node.name, type: 'community', val: String(node.val), degree: 1, neighbors: [{ id: 'c:beta', name: 'Beta', val: '95', type: 'community', degree: 1 }] }),
+    });
+  });
 }
 
 test('renders a meaningful revision-pinned universe and exposes analyst mode', async ({ page }) => {
@@ -37,6 +68,7 @@ test('renders a meaningful revision-pinned universe and exposes analyst mode', a
   const canvas = page.locator('[role="application"] canvas').first();
   await expect(canvas).toBeVisible();
   await expect(page.locator('[role="application"]')).toHaveAttribute('data-visible-node-count', '4');
+  await expect(page.locator('[role="application"]')).toHaveAttribute('data-visible-label-count', '4');
   await expect.poll(async () => canvas.evaluate(element => element.toDataURL().length)).toBeGreaterThan(1000);
   await expect.poll(async () => canvas.evaluate(element => new Promise<number>(resolve => requestAnimationFrame(() => {
     const gl = element.getContext('webgl2') || element.getContext('webgl');
@@ -73,6 +105,38 @@ test('renders a meaningful revision-pinned universe and exposes analyst mode', a
   expect(browserErrors).toEqual([]);
 
   if (artifactDirectory) await page.screenshot({ path: `${artifactDirectory}/clustr-observatory-desktop.png`, fullPage: true });
+});
+
+test('uses one published world across Map, Data, Places, and keyboard inspection', async ({ page }) => {
+  const legacyGraphRequests: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/graph') legacyGraphRequests.push(request.url());
+  });
+  await mockSpatialWorld(page);
+  await page.goto('/');
+
+  const universe = page.getByRole('application', { name: /interactive community universe/i });
+  await expect(universe).toHaveAttribute('data-revision', 'rev-42');
+  await universe.focus();
+  await universe.press('Enter');
+  await expect(page.getByRole('complementary', { name: 'Node Inspector Panel' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Alpha' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await expect(page.getByRole('application', { name: /published community map/i })).toBeVisible();
+  await expect(page.locator('[data-revision="rev-42"]')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Data', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Universe telemetry' })).toBeVisible();
+  await expect(page.getByText('7.1M')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Places', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Community landmarks' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Alpha/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /recompute/i })).toHaveCount(0);
+
+  expect(legacyGraphRequests).toEqual([]);
 });
 
 test('keeps the universe and primary travel controls usable on mobile', async ({ page }) => {

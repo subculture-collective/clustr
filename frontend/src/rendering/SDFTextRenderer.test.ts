@@ -50,6 +50,7 @@ vi.mock('troika-three-text', () => {
   
   return {
     Text: MockText,
+    configureTextBuilder: vi.fn(),
   };
 });
 

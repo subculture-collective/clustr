@@ -120,7 +120,7 @@
     height: 100dvh;
     overflow: auto;
     background: var(--void);
-    padding: 5rem 0 6rem;
+    padding: 10rem 0 7rem;
   }
   .content-view > * { min-height: calc(100dvh - 11rem); height: auto !important; background: transparent !important; }
   .content-view h1, .content-view h2, .content-view h3 { letter-spacing: -.025em; }
@@ -140,6 +140,10 @@
 
 @media (max-width: 767px) {
   .observatory-shell::after { background-size: 32px 32px; }
+}
+
+@media (min-width: 768px) {
+  .content-view { padding-top: 6rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

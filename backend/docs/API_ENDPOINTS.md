@@ -1,5 +1,39 @@
 # API Endpoints
 
+## Published Spatial World
+
+These endpoints require revision-aware reads to be enabled. Omitting `revision` selects the current published revision; clients should read the manifest once and send that revision on every subsequent request for the page lifetime.
+
+### GET /api/graph/manifest
+
+Returns the active immutable graph revision, spatial catalog identity, exact catalog and resident counts, coordinate bounds, hierarchy levels, and scene contract.
+
+### GET /api/graph/telemetry
+
+Returns exact measurements from the spatial catalog attached to the requested published revision. Query parameters:
+
+- `revision` (optional): Published graph revision ID.
+- `top_limit` (optional): Number of subreddit and user rankings, default 20 and maximum 100.
+
+The response contains `revision_id`, `spatial_catalog_id`, exact entity/link/community totals, exact per-type counts, `top_subreddits`, and `top_users`. It is the public telemetry contract; clients must not infer corpus totals from `/api/graph` samples.
+
+### GET /api/graph/communities
+
+Returns published community landmarks in deterministic `size DESC, community_id` order. Query parameters:
+
+- `revision` (optional): Published graph revision ID.
+- `level` (optional): Non-negative hierarchy level, default 0.
+- `limit` (optional): Page size, default 50 and maximum 200.
+- `cursor` (optional): Opaque continuation bound to the revision and level.
+
+The response contains `revision_id`, `spatial_catalog_id`, `level`, landmark IDs/labels/sizes/coordinates, and an optional `next_cursor`.
+
+### GET /api/nodes/{id}
+
+Returns revision- and catalog-identified details for a spatial entity or published community landmark, plus at most `neighbor_limit` typed neighbors. Community IDs use the same stable identities returned by the overview and communities endpoints.
+
+---
+
 ## Search API
 
 ### GET /api/search

@@ -10,7 +10,7 @@ describe('SearchBar', () => {
   const waitForDebounce = () => new Promise((resolve) => setTimeout(resolve, 175));
 
   beforeEach(() => {
-    fetchMock = vi.fn();
+    fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: 9, spatial_catalog_id: 4 }), { status: 200 }));
     global.fetch = fetchMock;
   });
 
@@ -42,6 +42,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [
           {
             ID: 'subreddit_1',
@@ -75,6 +76,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [
           {
             ID: 'subreddit_1',
@@ -113,6 +115,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [
           {
             ID: 'subreddit_1',
@@ -150,6 +153,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [
           {
             ID: 'subreddit_1',
@@ -195,6 +199,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [
           {
             ID: 'subreddit_1',
@@ -234,6 +239,7 @@ describe('SearchBar', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        revision_id: 9,
         results: [],
       }),
     } as Response);
@@ -280,7 +286,7 @@ describe('SearchBar', () => {
     // Resolve the search
     resolveSearch!({
       ok: true,
-      json: async () => ({ results: [] }),
+      json: async () => ({ revision_id: 9, results: [] }),
     } as Response);
   });
 });

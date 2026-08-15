@@ -277,6 +277,7 @@ interface Props {
   focusNodeId?: string;
   selectedId?: string;
   onNodeSelect?: (id?: string) => void;
+  onInspectNode?: (id: string) => void;
   showLabels?: boolean; // when true, render always-on label sprites for key nodes
   communityResult?: {
     nodeCommunities: Map<string, number>;

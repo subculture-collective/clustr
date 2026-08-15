@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useSpatialWorldClient } from '../contexts/spatialWorld';
 
 interface SearchBarProps {
   onSelectNode: (nodeId: string) => void;
@@ -16,21 +17,8 @@ interface SearchResult {
   type?: string;
 }
 
-// Backend API response structure from sqlc-generated code
-interface ApiSearchResultRow {
-  ID: string;
-  Name: string;
-  Val: string;
-  Type: {
-    String: string;
-    Valid: boolean;
-  } | null;
-  PosX?: { Float64: number; Valid: boolean } | null;
-  PosY?: { Float64: number; Valid: boolean } | null;
-  PosZ?: { Float64: number; Valid: boolean } | null;
-}
-
 const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, className = '' }, ref) => {
+  const spatialWorldClient = useSpatialWorldClient();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -69,38 +57,25 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
 
       try {
         const startTime = performance.now();
-        const apiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-        const response = await fetch(
-          `${apiUrl}/search?node=${encodeURIComponent(searchQuery)}&limit=10`,
-          { signal: abortControllerRef.current.signal }
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          const endTime = performance.now();
+        const data = await spatialWorldClient.search(searchQuery, 10, abortControllerRef.current.signal);
+        const endTime = performance.now();
           
-          if (import.meta.env.DEV) {
-            console.log(`Search completed in ${(endTime - startTime).toFixed(2)}ms`);
-          }
+        if (import.meta.env.DEV) {
+          console.log(`Search completed in ${(endTime - startTime).toFixed(2)}ms`);
+        }
 
           // Map backend response to frontend format
-          const rawResults = (data.results || []) as ApiSearchResultRow[];
-          const apiResults: SearchResult[] = rawResults.map((row) => ({
-            id: row.ID,
-            name: row.Name,
-            val: row.Val,
-            type: row.Type && row.Type.Valid ? row.Type.String : undefined,
-          }));
+        const rawResults = data.results || [];
+        const apiResults: SearchResult[] = rawResults.map((row) => ({
+          id: row.ID,
+          name: row.Name,
+          val: row.Val,
+          type: row.Type && row.Type.Valid ? row.Type.String : undefined,
+        }));
 
-          setResults(apiResults);
-          setIsOpen(true); // Always open to show results or "no results" message
-          setSelectedIndex(0);
-        } else {
-          // Handle non-OK responses by clearing results and closing dropdown
-          setResults([]);
-          setIsOpen(false);
-          console.error(`Search API returned status ${response.status}`);
-        }
+        setResults(apiResults);
+        setIsOpen(true); // Always open to show results or "no results" message
+        setSelectedIndex(0);
       } catch (error) {
         if (error instanceof Error && error.name !== 'AbortError') {
           console.error('API search failed:', error);
@@ -112,7 +87,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
         setIsLoading(false);
       }
     },
-    []
+    [spatialWorldClient]
   );
 
   // Select a node and focus on it

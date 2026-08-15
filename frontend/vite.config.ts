@@ -27,6 +27,24 @@ export default defineConfig(({ mode }) => {
       "/jobs": proxyTarget,
     },
   },
+  build: {
+    // Three.js is a deliberately isolated 270 kB gzip vendor chunk. Keep the
+    // warning threshold above that stable dependency while retaining the
+    // default-sized budget for the 94 kB gzip application entry chunk.
+    chunkSizeWarningLimit: 1100,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("/three/") || id.includes("three-stdlib")) return "three";
+          if (id.includes("react-force-graph") || id.includes("three-forcegraph") || id.includes("d3-force-3d")) return "graph-renderer";
+          if (id.includes("/d3-") || id.includes("/d3/")) return "d3";
+          if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("scheduler")) return "react";
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

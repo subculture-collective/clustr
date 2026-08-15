@@ -30,6 +30,8 @@ export interface SelectedInfo {
 
 // API response type with detailed neighbor information
 export interface NodeDetails {
+  revision_id?: string | number;
+  spatial_catalog_id?: string | number;
   id: string;
   name?: string;
   val?: string;

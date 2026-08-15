@@ -19,6 +19,12 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { detectWebGLSupport } from "./utils/webglDetect";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
+function readableSelection(id: string): string {
+  const withoutPrefix = id.replace(/^(subreddit|user|post|comment)[_:]/i, "").replace(/^c:/i, "");
+  const label = withoutPrefix.replace(/[_:.-]+/g, " ").trim();
+  return label ? label.replace(/\b\w/g, character => character.toUpperCase()) : id;
+}
+
 function App() {
   // Initialize state from URL if available
   const urlState = readStateFromURL();
@@ -289,7 +295,7 @@ function App() {
         className="sr-only"
         id="screen-reader-announcements"
       >
-        {selectedId ? `Selected ${selectedId}.` : `Showing ${viewMode === "3d" ? "the three dimensional universe" : viewMode}.`}
+        {selectedId ? `Selected ${readableSelection(selectedId)}.` : `Showing ${viewMode === "3d" ? "the three dimensional universe" : viewMode}.`}
       </div>
 
       <header className="pointer-events-none fixed inset-x-0 top-0 z-50 flex items-start justify-between gap-3 p-3 md:p-5">
@@ -445,6 +451,11 @@ function App() {
                   setFocusNodeId(id);
                   setSelectedId(id);
                 }}
+                onInspectNode={(id) => {
+                  setFocusNodeId(id);
+                  setSelectedId(id);
+                  setExperienceMode("analyst");
+                }}
                 communityResult={useCommunityColors ? communityResult : null}
                 usePrecomputedLayout={usePrecomputedLayout}
                 initialCamera={camera3dRef}
@@ -492,7 +503,7 @@ function App() {
             communityCount={communityResult?.communities.length}
           />}
           {experienceMode === "analyst" && <Inspector
-            selected={selectedId ? { id: selectedId } : undefined}
+            selected={selectedId ? { id: selectedId, name: readableSelection(selectedId) } : undefined}
             onClear={() => {
               setSelectedId(undefined);
               setFocusNodeId(undefined);
@@ -518,7 +529,7 @@ function App() {
       {selectedId && experienceMode === "explore" && (viewMode === "3d" || viewMode === "2d") && (
         <aside className="instrument-panel fixed bottom-24 left-1/2 z-40 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-4 pr-2" aria-label="Selected object">
           <span className="signal-dot" aria-hidden="true" />
-          <div className="min-w-0"><p className="instrument-label">Attention lock</p><p className="max-w-48 truncate font-mono text-xs text-white">{selectedId}</p></div>
+          <div className="min-w-0"><p className="instrument-label">Attention lock</p><p className="max-w-48 truncate text-sm font-medium text-white">{readableSelection(selectedId)}</p></div>
           <button type="button" className="instrument-button rounded-full px-3 text-[11px] text-white" onClick={() => setExperienceMode("analyst")}>Inspect</button>
           <button type="button" className="instrument-button rounded-full px-3 text-[11px]" aria-label="Clear selection" onClick={() => { setSelectedId(undefined); setFocusNodeId(undefined); }}>×</button>
         </aside>
