@@ -361,34 +361,43 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 	// Keep full public text in a separate TOAST-backed table so spatial scans
 	// never touch wide documents. Removed/deleted source text is represented by
 	// an identity-only tombstone; its former contents are never copied.
-	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_documents(
+	documentStatements := []struct {
+		stage string
+		query string
+	}{
+		{"subreddit_documents", `INSERT INTO spatial_catalog_documents(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
-SELECT $1,e.id,e.type,document.title,document.body,document.description,document.permalink,
- document.sensitive,false,document.created_at,e.source_updated_at,
- jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',document.text_excluded)
-FROM spatial_catalog_entities e
-LEFT JOIN LATERAL (
- SELECT NULL::text title,NULL::text body,s.description,NULL::text permalink,false sensitive,
-  s.created_at,false text_excluded
- FROM subreddits s WHERE e.type='subreddit' AND e.id='subreddit_'||s.id
- UNION ALL
- SELECT NULL,NULL,NULL,NULL,false,u.created_at,false
- FROM users u WHERE e.type='user' AND e.id='user_'||u.id
- UNION ALL
- SELECT CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.title END,
-  CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.selftext END,NULL,p.permalink,
-  p.source_sensitive,p.created_at,p.source_removed OR p.source_deleted
- FROM posts p WHERE e.type='post' AND e.id='post_'||p.id
- UNION ALL
- SELECT NULL,CASE WHEN c.source_removed OR c.source_deleted THEN NULL ELSE c.body END,NULL,
-  CASE WHEN p.permalink IS NULL THEN NULL ELSE rtrim(p.permalink,'/')||'/comment/'||c.id END,
-  c.source_sensitive,c.created_at,c.source_removed OR c.source_deleted
- FROM comments c JOIN posts p ON p.id=c.post_id WHERE e.type='comment' AND e.id='comment_'||c.id
-) document ON true
-WHERE e.catalog_id=$1`, catalogID, watermark)
-	if err != nil {
-		return failTx("catalog_documents", err)
+SELECT $1,e.id,'subreddit',NULL,NULL,s.description,NULL,false,false,s.created_at,e.source_updated_at,
+ jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',false)
+FROM subreddits s JOIN spatial_catalog_entities e
+ ON e.catalog_id=$1 AND e.type='subreddit' AND e.id='subreddit_'||s.id`},
+		{"post_documents", `INSERT INTO spatial_catalog_documents(
+catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
+administrative_sensitive,content_created_at,content_updated_at,provenance)
+SELECT $1,e.id,'post',
+ CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.title END,
+ CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.selftext END,
+ NULL,p.permalink,p.source_sensitive,false,p.created_at,e.source_updated_at,
+ jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',p.source_removed OR p.source_deleted)
+FROM posts p JOIN spatial_catalog_entities e
+ ON e.catalog_id=$1 AND e.type='post' AND e.id='post_'||p.id`},
+		{"comment_documents", `INSERT INTO spatial_catalog_documents(
+catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
+administrative_sensitive,content_created_at,content_updated_at,provenance)
+SELECT $1,e.id,'comment',NULL,
+ CASE WHEN c.source_removed OR c.source_deleted THEN NULL ELSE c.body END,NULL,
+ CASE WHEN p.permalink IS NULL THEN NULL ELSE rtrim(p.permalink,'/')||'/comment/'||c.id END,
+ c.source_sensitive,false,c.created_at,e.source_updated_at,
+ jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',c.source_removed OR c.source_deleted)
+FROM comments c JOIN posts p ON p.id=c.post_id JOIN spatial_catalog_entities e
+ ON e.catalog_id=$1 AND e.type='comment' AND e.id='comment_'||c.id`},
+	}
+	for _, statement := range documentStatements {
+		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
+			return failTx(statement.stage, err)
+		}
+		logger.InfoContext(ctx, "Spatial document stage complete", "catalog_id", catalogID, "stage", statement.stage)
 	}
 
 	logger.InfoContext(ctx, "Spatial entities placed", "catalog_id", catalogID)
@@ -519,7 +528,8 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 		return failTx("expected_count", err)
 	}
 	expectedEntities := expectedSubreddits + expectedUsers + expectedPosts + expectedComments
-	if entities != expectedEntities || documents != entities || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
+	expectedDocuments := expectedSubreddits + expectedPosts + expectedComments
+	if entities != expectedEntities || documents != expectedDocuments || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
 		entities == 0 || links == 0 || emptyLabels != 0 || orphanLinks != 0 || minX == maxX || minY == maxY || minZ == maxZ ||
 		minX < -1e12 || maxX > 1e12 || minY < -1e12 || maxY > 1e12 || minZ < -1e12 || maxZ > 1e12 {
 		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d documents=%d expected=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, documents, expectedEntities, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
