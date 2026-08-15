@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const world = {
   revision_id: 'rev-42',
   nodes: [
-    { id: 'c:alpha', name: 'Alpha', type: 'community', val: 120, x: -120, y: -60, z: -80 },
+    { id: 'c:new:c3875a74587b5df7', name: 'Alpha', type: 'community', val: 120, x: -120, y: -60, z: -80 },
     { id: 'c:beta', name: 'Beta', type: 'community', val: 95, x: 140, y: -20, z: 40 },
     { id: 'c:gamma', name: 'Gamma', type: 'community', val: 80, x: 10, y: 150, z: 130 },
     { id: 'c:delta', name: 'Delta', type: 'community', val: 65, x: -30, y: -140, z: 170 },
@@ -44,7 +44,10 @@ async function mockSpatialWorld(page: Page) {
       revision_id: 'rev-42',
       spatial_catalog_id: 'catalog-8',
       level: 0,
-      communities: world.nodes.map(node => ({ id: node.id, label: node.name, size: node.val, x: node.x, y: node.y, z: node.z })),
+      communities: [
+        ...world.nodes.map(node => ({ id: node.id, label: node.name, size: node.val, x: node.x, y: node.y, z: node.z })),
+        { id: 'c:new:d8909f50aeb05ee6', label: 'HistoryMemes · Minecraft · Overwatch', size: 328, x: 80, y: 90, z: 30 },
+      ],
     }),
   }));
   await page.route('**/api/nodes/**', route => {
@@ -152,6 +155,13 @@ test('keeps the universe and primary travel controls usable on mobile', async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.getByRole('navigation', { name: 'Primary views' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Universe', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Places', exact: true }).click();
+  const places = page.locator('.content-view');
+  await expect(page.getByRole('heading', { name: 'Community landmarks' })).toBeVisible();
+  expect(await places.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(
+    await places.evaluate(element => element.clientWidth),
+  );
 
   const artifactDirectory = process.env.CLUSTR_VISUAL_DIR;
   if (artifactDirectory) await page.screenshot({ path: `${artifactDirectory}/clustr-observatory-mobile.png`, fullPage: true });

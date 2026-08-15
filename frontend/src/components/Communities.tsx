@@ -86,9 +86,9 @@ export default function Communities({ onViewMode, onFocusNode, onApplyCommunityC
         </header>
 
         <p className="mb-4 font-mono text-xs text-gray-400">{communities.length} landmark{communities.length === 1 ? '' : 's'} loaded</p>
-        <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {communities.map(community => (
-            <li key={community.id}>
+            <li key={community.id} className="min-w-0">
               <button
                 className="group flex min-h-32 w-full items-start gap-4 rounded-2xl border border-white/10 bg-gray-800 p-5 text-left hover:border-white/25 hover:bg-gray-700"
                 onClick={() => { onFocusNode?.(community.id); onViewMode?.('3d'); }}
@@ -97,7 +97,7 @@ export default function Communities({ onViewMode, onFocusNode, onApplyCommunityC
                 <span className="min-w-0">
                   <span className="block truncate text-lg font-semibold">{community.label}</span>
                   <span className="mt-2 block text-sm text-gray-400">{community.size.toLocaleString()} resident entities</span>
-                  <span className="mt-4 block font-mono text-[10px] text-gray-500">{community.id}</span>
+                  <span className="mt-4 block truncate font-mono text-[10px] text-gray-500">{community.id}</span>
                 </span>
               </button>
             </li>
