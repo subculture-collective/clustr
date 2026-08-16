@@ -205,7 +205,7 @@ CREATE TABLE spatial_catalog_documents (
   ) STORED,
   PRIMARY KEY (catalog_id,entity_id),
   FOREIGN KEY (catalog_id,entity_id) REFERENCES spatial_catalog_entities(catalog_id,id) ON DELETE CASCADE
-);
+) PARTITION BY LIST (catalog_id);
 
 CREATE INDEX spatial_catalog_documents_search_idx ON spatial_catalog_documents USING gin(search_vector);
 CREATE INDEX spatial_catalog_documents_type_time_idx ON spatial_catalog_documents(catalog_id,entity_type,content_updated_at DESC,entity_id);

@@ -361,19 +361,32 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 	// Keep full public text in a separate TOAST-backed table so spatial scans
 	// never touch wide documents. Removed/deleted source text is represented by
 	// an identity-only tombstone; its former contents are never copied.
+	//
+	// Each immutable catalog is one document partition. Loading an unattached
+	// heap lets PostgreSQL build the primary, filter, and GIN indexes in bulk at
+	// attach time instead of maintaining them row-by-row for millions of full-
+	// text documents. The catalog ID comes from the database sequence, so this
+	// generated identifier contains only the fixed prefix and decimal digits.
+	documentPartition := fmt.Sprintf("spatial_catalog_documents_catalog_%d", catalogID)
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(`CREATE TABLE %s (
+LIKE spatial_catalog_documents INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING GENERATED INCLUDING STORAGE
+)`, documentPartition))
+	if err != nil {
+		return failTx("document_partition", err)
+	}
 	documentStatements := []struct {
 		stage string
 		query string
 	}{
-		{"subreddit_documents", `INSERT INTO spatial_catalog_documents(
+		{"subreddit_documents", fmt.Sprintf(`INSERT INTO %s(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
 SELECT $1,'subreddit_'||s.id,'subreddit',NULL,NULL,s.description,NULL,false,false,s.created_at,
  COALESCE(s.updated_at,s.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',false)
 FROM subreddits s
-WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`},
-		{"post_documents", `INSERT INTO spatial_catalog_documents(
+WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, documentPartition)},
+		{"post_documents", fmt.Sprintf(`INSERT INTO %s(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
 SELECT $1,'post_'||p.id,'post',
@@ -383,8 +396,8 @@ SELECT $1,'post_'||p.id,'post',
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',p.source_removed OR p.source_deleted)
 FROM posts p
 WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
- AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`},
-		{"comment_documents", `INSERT INTO spatial_catalog_documents(
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`, documentPartition)},
+		{"comment_documents", fmt.Sprintf(`INSERT INTO %s(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
 SELECT $1,'comment_'||c.id,'comment',NULL,
@@ -395,7 +408,7 @@ SELECT $1,'comment_'||c.id,'comment',NULL,
 FROM comments c JOIN posts p ON p.id=c.post_id
 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
  AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
- AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id OR automated.user_id=p.author_id)`},
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id OR automated.user_id=p.author_id)`, documentPartition)},
 	}
 	for _, statement := range documentStatements {
 		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
@@ -403,6 +416,14 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 		}
 		logger.InfoContext(ctx, "Spatial document stage complete", "catalog_id", catalogID, "stage", statement.stage)
 	}
+	partitionBoundName := fmt.Sprintf("spatial_catalog_documents_catalog_%d_bound", catalogID)
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD CONSTRAINT %s CHECK (catalog_id=%d)`, documentPartition, partitionBoundName, catalogID)); err != nil {
+		return failTx("document_partition_bound", err)
+	}
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE spatial_catalog_documents ATTACH PARTITION %s FOR VALUES IN (%d)`, documentPartition, catalogID)); err != nil {
+		return failTx("document_partition_indexes", err)
+	}
+	logger.InfoContext(ctx, "Spatial document partition indexed", "catalog_id", catalogID, "partition", documentPartition)
 
 	logger.InfoContext(ctx, "Spatial entities placed", "catalog_id", catalogID)
 	// The catalog is bulk-loaded in this transaction, so the table statistics do
