@@ -368,30 +368,34 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 		{"subreddit_documents", `INSERT INTO spatial_catalog_documents(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
-SELECT $1,e.id,'subreddit',NULL,NULL,s.description,NULL,false,false,s.created_at,e.source_updated_at,
+SELECT $1,'subreddit_'||s.id,'subreddit',NULL,NULL,s.description,NULL,false,false,s.created_at,
+ COALESCE(s.updated_at,s.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',false)
-FROM subreddits s JOIN spatial_catalog_entities e
- ON e.catalog_id=$1 AND e.type='subreddit' AND e.id='subreddit_'||s.id`},
+FROM subreddits s
+WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`},
 		{"post_documents", `INSERT INTO spatial_catalog_documents(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
-SELECT $1,e.id,'post',
+SELECT $1,'post_'||p.id,'post',
  CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.title END,
  CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.selftext END,
- NULL,p.permalink,p.source_sensitive,false,p.created_at,e.source_updated_at,
+ NULL,p.permalink,p.source_sensitive,false,p.created_at,COALESCE(p.updated_at,p.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',p.source_removed OR p.source_deleted)
-FROM posts p JOIN spatial_catalog_entities e
- ON e.catalog_id=$1 AND e.type='post' AND e.id='post_'||p.id`},
+FROM posts p
+WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`},
 		{"comment_documents", `INSERT INTO spatial_catalog_documents(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
 administrative_sensitive,content_created_at,content_updated_at,provenance)
-SELECT $1,e.id,'comment',NULL,
+SELECT $1,'comment_'||c.id,'comment',NULL,
  CASE WHEN c.source_removed OR c.source_deleted THEN NULL ELSE c.body END,NULL,
  CASE WHEN p.permalink IS NULL THEN NULL ELSE rtrim(p.permalink,'/')||'/comment/'||c.id END,
- c.source_sensitive,false,c.created_at,e.source_updated_at,
+ c.source_sensitive,false,c.created_at,COALESCE(c.updated_at,c.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',c.source_removed OR c.source_deleted)
-FROM comments c JOIN posts p ON p.id=c.post_id JOIN spatial_catalog_entities e
- ON e.catalog_id=$1 AND e.type='comment' AND e.id='comment_'||c.id`},
+FROM comments c JOIN posts p ON p.id=c.post_id
+WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
+ AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id OR automated.user_id=p.author_id)`},
 	}
 	for _, statement := range documentStatements {
 		if _, err = tx.ExecContext(ctx, statement.query, catalogID, watermark); err != nil {
