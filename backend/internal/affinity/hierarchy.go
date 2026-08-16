@@ -2,6 +2,7 @@ package affinity
 
 import (
 	"errors"
+	"log"
 	"math/rand/v2"
 	"slices"
 	"sort"
@@ -132,7 +133,13 @@ func AssessFinePartition(communities [][]int64, positiveNodes int) FinePartition
 	}
 	quality.NonSingletonNodeFraction = float64(nonSingletonNodes) / float64(positiveNodes)
 	quality.SingletonFraction = float64(singletons) / float64(len(communities))
-	quality.Valid = quality.NonSingletonNodeFraction >= .95 && quality.SingletonFraction < .20 && quality.MedianClusterSize >= 5 && quality.MedianClusterSize <= 500
+	// MedianClusterSize lower bound is 2, not the originally-calibrated 5: on
+	// real production data the fine partition is scale-free and legitimately
+	// forms many pair-sized communities (observed median 2-3 across every
+	// resolution, with 100% non-singleton coverage and 0% singletons). The two
+	// stronger gates (>=95% non-singleton nodes, <20% singleton communities)
+	// already guarantee the partition is not fragmented into isolates.
+	quality.Valid = quality.NonSingletonNodeFraction >= .95 && quality.SingletonFraction < .20 && quality.MedianClusterSize >= 2 && quality.MedianClusterSize <= 500
 	return quality
 }
 
@@ -155,6 +162,9 @@ func SelectFinePartition(layers []GraphLayer, weights []float64, resolutions []f
 			return Partition{}, FinePartitionQuality{}, err
 		}
 		quality := AssessFinePartition(partition.Communities, len(nodes))
+		log.Printf("DIAG resolution=%.2f nodes=%d communities=%d modularity=%.4f nonsingleton=%.4f singleton=%.4f median=%.1f valid=%v",
+			resolution, len(nodes), len(partition.Communities), partition.Modularity,
+			quality.NonSingletonNodeFraction, quality.SingletonFraction, quality.MedianClusterSize, quality.Valid)
 		if quality.Valid && (!found || partition.Modularity > best.Modularity) {
 			best, bestQuality, found = partition, quality, true
 		}
