@@ -20,7 +20,7 @@ const (
 	advisoryLockID = int64(0x434c55535452) // "CLUSTR"
 )
 
-const CurrentMigration = "000032_affinity_catalog_v2.up.sql"
+const CurrentMigration = "000036_telemetry_user_activity_index.up.sql"
 
 // VerifyCurrent fails closed when a service is launched without the documented
 // migration runner having applied the schema it was compiled against.
@@ -197,6 +197,15 @@ func (r Runner) apply(ctx context.Context, name string) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read migration history for %s: %w", name, err)
 	}
+	if requiresNoTransaction(body) {
+		if _, err = r.DB.ExecContext(ctx, string(body)); err != nil {
+			return fmt.Errorf("apply non-transactional migration %s: %w", name, err)
+		}
+		if _, err = r.DB.ExecContext(ctx, `INSERT INTO clustr_schema_migrations(filename, checksum_sha256) VALUES ($1, $2)`, name, sum); err != nil {
+			return fmt.Errorf("record non-transactional migration %s: %w", name, err)
+		}
+		return nil
+	}
 
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -214,6 +223,10 @@ func (r Runner) apply(ctx context.Context, name string) error {
 		return fmt.Errorf("commit migration %s: %w", name, err)
 	}
 	return nil
+}
+
+func requiresNoTransaction(body []byte) bool {
+	return strings.Contains(strings.ToUpper(string(body)), "CREATE INDEX CONCURRENTLY")
 }
 
 func (r Runner) verifyChecksum(ctx context.Context, name, expected string) error {

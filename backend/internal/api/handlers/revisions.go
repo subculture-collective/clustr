@@ -230,14 +230,33 @@ func (h *RevisionHandler) Telemetry(w http.ResponseWriter, r *http.Request) {
 		TopUsers:       []telemetryUser{},
 	}
 	var subreddits, users, posts, comments int64
-	err = h.db.QueryRowContext(r.Context(), `SELECT
-(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
-(SELECT count(*) FROM spatial_catalog_links l WHERE l.catalog_id=$1 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.restored_at IS NULL AND s.entity_id IN (l.source,l.target))),
-(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='subreddit' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
-(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='user' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
-(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='post' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
-(SELECT count(*) FROM spatial_catalog_entities e WHERE e.catalog_id=$1 AND e.type='comment' AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)),
-(SELECT count(*) FROM graph_revision_communities c WHERE c.revision_id=$2 AND c.level=0 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=c.community_id AND s.restored_at IS NULL))`, catalog.Int64, id).Scan(
+	err = h.db.QueryRowContext(r.Context(), `WITH active AS MATERIALIZED (
+ SELECT entity_id FROM public_entity_suppressions WHERE restored_at IS NULL
+), suppressed_entities AS (
+ SELECT e.type,count(*) count FROM active s
+ JOIN spatial_catalog_entities e ON e.catalog_id=$1 AND e.id=s.entity_id GROUP BY e.type
+), suppressed_links AS (
+ SELECT count(*) count FROM (
+  SELECT l.source,l.target,l.relation FROM active s
+  JOIN spatial_catalog_links l ON l.catalog_id=$1 AND l.source=s.entity_id
+  UNION
+  SELECT l.source,l.target,l.relation FROM active s
+  JOIN spatial_catalog_links l ON l.catalog_id=$1 AND l.target=s.entity_id
+ ) affected
+), suppressed_communities AS (
+ SELECT count(*) count FROM active s
+ JOIN graph_revision_communities c ON c.revision_id=$2 AND c.level=0 AND c.community_id=s.entity_id
+)
+SELECT
+sc.entity_count-COALESCE((SELECT sum(count) FROM suppressed_entities),0),
+sc.link_count-COALESCE((SELECT count FROM suppressed_links),0),
+sc.subreddit_count-COALESCE((SELECT count FROM suppressed_entities WHERE type='subreddit'),0),
+sc.user_count-COALESCE((SELECT count FROM suppressed_entities WHERE type='user'),0),
+sc.post_count-COALESCE((SELECT count FROM suppressed_entities WHERE type='post'),0),
+sc.comment_count-COALESCE((SELECT count FROM suppressed_entities WHERE type='comment'),0),
+r.community_count-COALESCE((SELECT count FROM suppressed_communities),0)
+FROM spatial_catalogs sc JOIN graph_revisions r ON r.id=$2
+WHERE sc.id=$1`, catalog.Int64, id).Scan(
 		&out.Totals.Entities, &out.Totals.Links, &subreddits, &users, &posts, &comments, &out.Totals.Communities)
 	if err != nil {
 		writeRevisionError(w, err)
@@ -250,7 +269,7 @@ COALESCE((metrics->>'subscribers')::bigint,0),COALESCE((metrics->>'activity_coun
 COALESCE((metrics->>'unique_users')::bigint,0)
 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type='subreddit'
 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
-ORDER BY COALESCE((metrics->>'subscribers')::bigint,0) DESC,id LIMIT $2`, catalog.Int64, limit)
+ORDER BY value DESC,id LIMIT $2`, catalog.Int64, limit)
 	if err != nil {
 		writeRevisionError(w, err)
 		return

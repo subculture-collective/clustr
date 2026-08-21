@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS spatial_catalog_entities_user_total_activity_idx;
