@@ -36,13 +36,20 @@ func main() {
 	if *fullCatalog && !*once {
 		log.Fatal("--full-catalog requires --once")
 	}
+	forceClear := forceClearEnabled()
+	if err := validateRunOptions(*publishOnly, forceClear); err != nil {
+		log.Fatal(err)
+	}
+	effectiveFullRebuild := effectiveFullRebuild(*fullRebuild, forceClear)
 
 	// Load configuration
 	cfg := config.Load()
 
 	// Initialize structured logging
 	logger.Init(cfg.LogLevel)
-	logger.Info("Initializing graph precalculation", "version", cfg.SentryRelease, "log_level", cfg.LogLevel, "full_rebuild", *fullRebuild)
+	logger.Info("Initializing graph precalculation", "version", cfg.SentryRelease, "log_level", cfg.LogLevel,
+		"requested_full_rebuild", *fullRebuild, "force_clear", forceClear, "effective_full_rebuild", effectiveFullRebuild,
+		"publish_only", *publishOnly, "full_catalog", *fullCatalog)
 
 	// Initialize error reporting
 	if err := errorreporting.Init(cfg.SentryEnvironment); err != nil {
@@ -113,22 +120,13 @@ func main() {
 
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	// On startup: optionally force-clear graph tables if PRECALC_FORCE_CLEAR=true
-	if os.Getenv("PRECALC_FORCE_CLEAR") == "1" || os.Getenv("PRECALC_FORCE_CLEAR") == "true" {
-		logger.Info("PRECALC_FORCE_CLEAR enabled: clearing graph tables and restarting from scratch")
-		if err := queries.ClearGraphTables(ctx); err != nil {
-			logger.Error("Failed to clear graph tables", "error", err)
-			log.Fatalf("failed to clear graph tables: %v", err)
-		}
-	}
-
 	// Crawl leases, stale scheduling, and retry recovery belong to the crawler
 	// lifecycle service. A graph worker must never mutate crawl scheduling state.
 
 	// Always run once at start when enabled (may defer if not enough data yet).
 	// A one-shot invocation is used by remote workers and deployment gates, so it
 	// must fail closed instead of reporting success after a skipped/failed build.
-	if err := runOnce(ctx, dbConn, queries, graphService, *fullRebuild, *publishOnly, *fullCatalog); err != nil {
+	if err := runOnce(ctx, dbConn, queries, graphService, effectiveFullRebuild, *publishOnly, *fullCatalog); err != nil {
 		logger.Error("Graph calculation/publication run failed", "error", err)
 		if *once {
 			log.Fatal(err)
@@ -178,6 +176,22 @@ func min(a, b int) int {
 	return b
 }
 
+func forceClearEnabled() bool {
+	value := os.Getenv("PRECALC_FORCE_CLEAR")
+	return value == "1" || value == "true"
+}
+
+func effectiveFullRebuild(requested, forceClear bool) bool {
+	return requested || forceClear
+}
+
+func validateRunOptions(publishOnly, forceClear bool) error {
+	if forceClear && publishOnly {
+		return fmt.Errorf("PRECALC_FORCE_CLEAR cannot be combined with --publish-only")
+	}
+	return nil
+}
+
 // hasMinSubredditsWithPosts returns true if at least `min` distinct subreddits have posts stored
 func hasMinSubredditsWithPosts(ctx context.Context, dbc *sql.DB, min int) (bool, int, error) {
 	var cnt int
@@ -195,6 +209,11 @@ func runOnce(ctx context.Context, dbc *sql.DB, queries *db.Queries, graphService
 		return fmt.Errorf("precalculation readiness check: %w", err)
 	} else if !ok {
 		return fmt.Errorf("precalculation deferred: only %d subreddits have posts; require 2", cnt)
+	}
+	if !fullCatalog {
+		if _, err := graph.RequirePublishedSpatialCatalog(ctx, dbc); err != nil {
+			return fmt.Errorf("graph-only publication prerequisite: %w", err)
+		}
 	}
 	if !publishOnly {
 		if err := graphService.PrecalculateGraphDataWithMode(ctx, fullRebuild); err != nil {

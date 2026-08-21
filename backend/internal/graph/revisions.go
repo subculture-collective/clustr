@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -77,6 +78,30 @@ func PublishRevisionAtWatermark(ctx context.Context, database *sql.DB, sourceWat
 	return publishRevisionWithOptions(ctx, database, DefaultRevisionOptions(), &sourceWatermark)
 }
 
+// RequirePublishedSpatialCatalog verifies that the current spatial catalog is
+// available for a graph-only publication.
+func RequirePublishedSpatialCatalog(ctx context.Context, database *sql.DB) (int64, error) {
+	var catalogID int64
+	var status sql.NullString
+	err := database.QueryRowContext(ctx, `SELECT current.catalog_id,catalog.status
+FROM spatial_catalog_current current
+LEFT JOIN spatial_catalogs catalog ON catalog.id=current.catalog_id
+WHERE current.singleton`).Scan(&catalogID, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("spatial catalog current is not set")
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read spatial catalog current: %w", err)
+	}
+	if !status.Valid {
+		return 0, fmt.Errorf("spatial catalog current references missing catalog %d", catalogID)
+	}
+	if status.String != "published" {
+		return 0, fmt.Errorf("spatial catalog current catalog %d is not published", catalogID)
+	}
+	return catalogID, nil
+}
+
 func publishRevisionWithOptions(ctx context.Context, database *sql.DB, options RevisionOptions, sourceWatermark *time.Time) (int64, error) {
 	if options.NodeCap < 1 || options.LinkCap < 1 || options.Retention < 1 ||
 		options.SubredditCap < 0 || options.UserCap < 0 || options.PostCap < 0 || options.CommentCap < 0 {
@@ -100,9 +125,14 @@ SELECT 'staging',COALESCE($2::timestamptz,GREATEST(
   COALESCE((SELECT max(updated_at) FROM users),to_timestamp(0)),
   COALESCE((SELECT max(updated_at) FROM posts),to_timestamp(0)),
   COALESCE((SELECT max(updated_at) FROM comments),to_timestamp(0))
-)),'projection-v1',$1::jsonb,'stable-community-3d-v1',0,3,
-  (SELECT catalog_id FROM spatial_catalog_current WHERE singleton)
+)),'projection-v1',$1::jsonb,'stable-community-3d-v1',0,3,catalog.id
+FROM spatial_catalog_current current
+JOIN spatial_catalogs catalog ON catalog.id=current.catalog_id AND catalog.status='published'
+WHERE current.singleton
 RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("create staging revision: spatial catalog current must reference a published catalog")
+	}
 	if err != nil {
 		return 0, fmt.Errorf("create staging revision: %w", err)
 	}
@@ -149,21 +179,23 @@ overlap AS (
  FROM graph_community_members m
  JOIN previous p ON true
  JOIN graph_revision_community_members pm ON pm.revision_id=p.revision_id AND pm.node_id=m.node_id
+ JOIN graph_revision_communities old ON old.revision_id=pm.revision_id AND old.community_id=pm.community_id AND old.level=0
  GROUP BY m.community_id,pm.community_id
 ), ranked AS (
  SELECT *,row_number() OVER(PARTITION BY legacy_id ORDER BY shared DESC,stable_id) rn_new,
           row_number() OVER(PARTITION BY stable_id ORDER BY shared DESC,legacy_id) rn_old
  FROM overlap
-), mutual AS (SELECT legacy_id,stable_id FROM ranked WHERE rn_new=1 AND rn_old=1),
-anchors AS (SELECT community_id,min(node_id) anchor FROM graph_community_members GROUP BY community_id)
-SELECT c.id legacy_id,COALESCE(mutual.stable_id,'c:new:'||substr(md5(COALESCE(anchors.anchor,c.id::text)),1,16)) stable_id,
+), mutual AS (SELECT legacy_id,stable_id FROM ranked WHERE rn_new=1 AND rn_old=1)
+SELECT c.id legacy_id,COALESCE(mutual.stable_id,'c:r'||$1::text||':'||c.id::text) stable_id,
        old.x old_x,old.y old_y,old.z old_z
 FROM graph_communities c LEFT JOIN mutual ON mutual.legacy_id=c.id
-LEFT JOIN anchors ON anchors.community_id=c.id
 LEFT JOIN previous p ON true
-LEFT JOIN graph_revision_communities old ON old.revision_id=p.revision_id AND old.community_id=mutual.stable_id`)
+LEFT JOIN graph_revision_communities old ON old.revision_id=p.revision_id AND old.community_id=mutual.stable_id AND old.level=0`, id)
 	if err != nil {
 		return failTx("community_matching", err)
+	}
+	if _, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX revision_community_map_stable_id_idx ON revision_community_map(stable_id)`); err != nil {
+		return failTx("community_matching_unique_ids", err)
 	}
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_communities(revision_id,community_id,parent_id,level,label,size,x,y,z)
@@ -178,17 +210,24 @@ FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id`, id)
 	// Community numbers are implementation detail, not useful landmarks. Name
 	// each territory from its three strongest subreddit members while retaining
 	// the stable community ID and coordinates across publications.
-	_, err = tx.ExecContext(ctx, `UPDATE graph_revision_communities c SET label=COALESCE((
- SELECT string_agg(member.name,' · ' ORDER BY member.value DESC,member.name)
- FROM (
-   SELECT n.name,CASE WHEN n.val ~ '^[0-9]+$' THEN n.val::bigint ELSE 0 END value
-   FROM graph_community_members gm
-   JOIN revision_community_map map ON map.legacy_id=gm.community_id
-   JOIN graph_nodes n ON n.id=gm.node_id AND n.type='subreddit'
-   WHERE map.stable_id=c.community_id
-   ORDER BY value DESC,n.name LIMIT 3
- ) member
-),c.label) WHERE c.revision_id=$1`, id)
+	_, err = tx.ExecContext(ctx, `WITH ranked AS (
+ SELECT map.stable_id,n.name,
+        CASE WHEN n.val ~ '^[0-9]+$' THEN n.val::bigint ELSE 0 END value,
+        row_number() OVER (
+          PARTITION BY map.stable_id
+          ORDER BY CASE WHEN n.val ~ '^[0-9]+$' THEN n.val::bigint ELSE 0 END DESC,n.name
+        ) rank
+ FROM graph_community_members gm
+ JOIN revision_community_map map ON map.legacy_id=gm.community_id
+ JOIN graph_nodes n ON n.id=gm.node_id AND n.type='subreddit'
+), labels AS (
+ SELECT stable_id,string_agg(name,' · ' ORDER BY value DESC,name) label
+ FROM ranked WHERE rank<=3 GROUP BY stable_id
+)
+UPDATE graph_revision_communities c
+SET label=labels.label
+FROM labels
+WHERE c.revision_id=$1 AND labels.stable_id=c.community_id`, id)
 	if err != nil {
 		return failTx("community_labels", err)
 	}
