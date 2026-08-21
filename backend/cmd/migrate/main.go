@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -11,7 +13,19 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
+	showVersion := flag.Bool("version", false, "Print build provenance and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("version=%s commit=%s build_time=%s\n", version, commit, buildTime)
+		return
+	}
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL is required")

@@ -155,7 +155,10 @@ SQL
     imported_fingerprint=$(gpg --batch --homedir "$export_gnupg" --with-colons --list-keys "$gpg_recipient" |
       awk -F: '$1=="fpr" {print $10; exit}')
     [[ ${imported_fingerprint,,} == ${gpg_recipient,,} ]] || clone_die "imported encryption key fingerprint mismatch"
-    gpg --batch --yes --homedir "$export_gnupg" --trust-model always \
+    # pg_dump already emits a zstd-compressed custom archive. Disable OpenPGP's
+    # second compression pass so a cutover backup remains I/O-bound instead of
+    # spending tens of minutes recompressing incompressible bytes.
+    gpg --batch --yes --compress-algo none --homedir "$export_gnupg" --trust-model always \
       --recipient "$gpg_recipient" --output "${archive}.part" --encrypt "$archive_part"
     rm -rf --one-file-system "$export_gnupg"
     rm -f "$archive_part"

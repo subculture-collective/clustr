@@ -23,13 +23,24 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
 	// Parse command-line flags
+	showVersion := flag.Bool("version", false, "Print build provenance and exit")
 	fullRebuild := flag.Bool("full", false, "Force a full rebuild instead of incremental update")
 	once := flag.Bool("once", false, "Run one calculation/publication and exit")
 	publishOnly := flag.Bool("publish-only", false, "Publish the existing graph workspace without rebuilding it (requires --once)")
 	fullCatalog := flag.Bool("full-catalog", false, "Build and publish a complete spatial catalog before the graph revision (requires --once)")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("version=%s commit=%s build_time=%s\n", version, commit, buildTime)
+		return
+	}
 	if *publishOnly && !*once {
 		log.Fatal("--publish-only requires --once")
 	}
@@ -47,7 +58,8 @@ func main() {
 
 	// Initialize structured logging
 	logger.Init(cfg.LogLevel)
-	logger.Info("Initializing graph precalculation", "version", cfg.SentryRelease, "log_level", cfg.LogLevel,
+	logger.Info("Initializing graph precalculation", "version", version, "commit", commit, "build_time", buildTime,
+		"sentry_release", cfg.SentryRelease, "log_level", cfg.LogLevel,
 		"requested_full_rebuild", *fullRebuild, "force_clear", forceClear, "effective_full_rebuild", effectiveFullRebuild,
 		"publish_only", *publishOnly, "full_catalog", *fullCatalog)
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Publish one bounded Clustr graph revision from Kvant
+Description=Manually rebuild the full Clustr spatial catalog from Kvant
 Documentation=file:///opt/clustr/docs/runbooks/almaz-kvant-launch.md
 After=network-online.target docker.service
 Wants=network-online.target
@@ -11,9 +11,9 @@ User=onnwee
 Group=onnwee
 Environment=HOME=/home/onnwee
 EnvironmentFile=/etc/clustr/kvant-precalculate.env
-ExecStart=/opt/clustr/deploy/kvant/run-precalculation.sh /etc/clustr/kvant-precalculate.env graph-revision
-TimeoutStartSec=2h
-TimeoutStopSec=2min
+ExecStart=/opt/clustr/deploy/kvant/run-precalculation.sh /etc/clustr/kvant-precalculate.env catalog-rebuild
+TimeoutStartSec=4h
+TimeoutStopSec=5min
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6
