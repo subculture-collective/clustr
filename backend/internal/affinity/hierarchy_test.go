@@ -43,4 +43,12 @@ func TestFinePartitionGates(t *testing.T) {
 	if quality.Valid {
 		t.Fatalf("singleton-dominated profile should fail: %+v", quality)
 	}
+	pairSized := make([][]int64, 10)
+	for index := range pairSized {
+		pairSized[index] = []int64{int64(index*2 + 1), int64(index*2 + 2)}
+	}
+	quality = affinity.AssessFinePartition(pairSized, 20)
+	if quality.Valid {
+		t.Fatalf("median cluster size below five should fail: %+v", quality)
+	}
 }

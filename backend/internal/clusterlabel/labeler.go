@@ -104,7 +104,6 @@ type providerOutput struct {
 	DisplayName       string   `json:"display_name"`
 	EvidenceGrounding []string `json:"evidence_grounding"`
 	Confidence        float64  `json:"confidence"`
-	MethodVersion     string   `json:"method_version"`
 }
 type completionResponse struct {
 	Choices []struct {
@@ -123,8 +122,8 @@ func callProvider(ctx context.Context, e Evidence, config Config) (Result, error
 	if len(allowedGrounding) == 0 {
 		return Result{}, errors.New("label evidence is empty")
 	}
-	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"display_name", "evidence_grounding", "confidence", "method_version"}, "properties": map[string]any{
-		"display_name": map[string]any{"type": "string"}, "evidence_grounding": map[string]any{"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": allowedGrounding}}, "confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "method_version": map[string]any{"type": "string", "const": PromptVersion}}}
+	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"display_name", "evidence_grounding", "confidence"}, "properties": map[string]any{
+		"display_name": map[string]any{"type": "string"}, "evidence_grounding": map[string]any{"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": allowedGrounding}}, "confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1}}}
 	evidenceJSON, _ := json.Marshal(e)
 	prompt := "Name this computed subreddit cluster. Return a neutral 2-5 word noun phrase. For evidence_grounding, select only exact, unmodified strings from the supplied representative_subreddits, tfidf_topics, or neighbor_macro_groups arrays. Ground the name only in that evidence and the aggregate metrics. Do not infer demographics, ideology, identity, intent, or facts not present. Do not merely repeat one giant subreddit. Evidence: " + string(evidenceJSON)
 	requestBody := map[string]any{"model": config.Model, "temperature": 0, "messages": []map[string]string{{"role": "system", "content": "You label aggregate communities neutrally. Never use or request usernames, post text, or comment text."}, {"role": "user", "content": prompt}}, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "cluster_label", "strict": true, "schema": schema}}}
@@ -165,7 +164,7 @@ func callProvider(ctx context.Context, e Evidence, config Config) (Result, error
 	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &output); err != nil {
 		return Result{}, err
 	}
-	return Result{DisplayName: strings.TrimSpace(output.DisplayName), EvidenceLabel: fallbackResult(e).EvidenceLabel, Method: "provider", MethodVersion: output.MethodVersion, Confidence: output.Confidence, Grounding: strings.Join(output.EvidenceGrounding, " · ")}, nil
+	return Result{DisplayName: strings.TrimSpace(output.DisplayName), EvidenceLabel: fallbackResult(e).EvidenceLabel, Method: "provider", MethodVersion: PromptVersion, Confidence: output.Confidence, Grounding: strings.Join(output.EvidenceGrounding, " · ")}, nil
 }
 
 func validate(result Result, e Evidence) error {

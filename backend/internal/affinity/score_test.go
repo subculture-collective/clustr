@@ -78,3 +78,13 @@ func TestInvalidAndEmptyEvidenceProduceZero(t *testing.T) {
 		}
 	}
 }
+
+func TestNegativeNPMIProducesNoAffinity(t *testing.T) {
+	result := affinity.Score(affinity.Evidence{ActiveUsers: affinity.Layer{
+		Observed: 2, LeftMarginal: 900, RightMarginal: 900, Universe: 1000, Available: true,
+	}}, affinity.Weights{affinity.ActiveUsers: 1})
+	component := result.Components[affinity.ActiveUsers]
+	if component.PositiveNPMI != 0 || component.Raw != 0 || result.RawAffinity != 0 || result.Affinity != 0 {
+		t.Fatalf("negative NPMI must not become a positive relationship: %+v", result)
+	}
+}
