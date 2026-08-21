@@ -357,6 +357,11 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 	if err != nil {
 		return failTx("comment_entities", err)
 	}
+	// The entity table has just been bulk-loaded. Refresh its statistics before
+	// document loading joins each source row back to its staged entity.
+	if _, err = tx.ExecContext(ctx, `ANALYZE spatial_catalog_entities`); err != nil {
+		return failTx("entity_statistics", err)
+	}
 
 	// Keep full public text in a separate TOAST-backed table so spatial scans
 	// never touch wide documents. Removed/deleted source text is represented by
@@ -384,7 +389,9 @@ administrative_sensitive,content_created_at,content_updated_at,provenance)
 SELECT $1,'subreddit_'||s.id,'subreddit',NULL,NULL,s.description,NULL,false,false,s.created_at,
  COALESCE(s.updated_at,s.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',false)
-FROM subreddits s
+ FROM subreddits s
+JOIN spatial_catalog_entities entity
+  ON entity.catalog_id=$1 AND entity.id='subreddit_'||s.id AND entity.type='subreddit'
 WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, documentPartition)},
 		{"post_documents", fmt.Sprintf(`INSERT INTO %s(
 catalog_id,entity_id,entity_type,title,body,description,source_permalink,source_sensitive,
@@ -394,7 +401,9 @@ SELECT $1,'post_'||p.id,'post',
  CASE WHEN p.source_removed OR p.source_deleted THEN NULL ELSE p.selftext END,
  NULL,p.permalink,p.source_sensitive,false,p.created_at,COALESCE(p.updated_at,p.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',p.source_removed OR p.source_deleted)
-FROM posts p
+ FROM posts p
+JOIN spatial_catalog_entities entity
+  ON entity.catalog_id=$1 AND entity.id='post_'||p.id AND entity.type='post'
 WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`, documentPartition)},
 		{"comment_documents", fmt.Sprintf(`INSERT INTO %s(
@@ -405,7 +414,10 @@ SELECT $1,'comment_'||c.id,'comment',NULL,
  CASE WHEN p.permalink IS NULL THEN NULL ELSE rtrim(p.permalink,'/')||'/comment/'||c.id END,
  c.source_sensitive,false,c.created_at,COALESCE(c.updated_at,c.created_at,to_timestamp(0)),
  jsonb_build_object('source_watermark',$2::timestamptz,'source','public-reddit','removed_text_excluded',c.source_removed OR c.source_deleted)
-FROM comments c JOIN posts p ON p.id=c.post_id
+FROM comments c
+JOIN posts p ON p.id=c.post_id
+JOIN spatial_catalog_entities entity
+  ON entity.catalog_id=$1 AND entity.id='comment_'||c.id AND entity.type='comment'
 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
  AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
  AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id OR automated.user_id=p.author_id)`, documentPartition)},
@@ -426,13 +438,6 @@ WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
 	logger.InfoContext(ctx, "Spatial document partition indexed", "catalog_id", catalogID, "partition", documentPartition)
 
 	logger.InfoContext(ctx, "Spatial entities placed", "catalog_id", catalogID)
-	// The catalog is bulk-loaded in this transaction, so the table statistics do
-	// not otherwise describe the new catalog_id. Refresh them before joining the
-	// staged entities back to the relationship tables; without this PostgreSQL can
-	// estimate one entity and choose a multiplicative nested-loop plan.
-	if _, err = tx.ExecContext(ctx, `ANALYZE spatial_catalog_entities`); err != nil {
-		return failTx("entity_statistics", err)
-	}
 	if _, err = tx.ExecContext(ctx, `SET LOCAL enable_nestloop = off`); err != nil {
 		return failTx("relationship_join_plan", err)
 	}
@@ -512,7 +517,7 @@ FROM weighted
 		return failTx("subreddit_overlap_projection_cleanup", err)
 	}
 
-	var entities, links, documents, subreddits, users, posts, comments, emptyLabels int64
+	var entities, links, documents, documentSubreddits, documentPosts, documentComments, documentMismatches, subreddits, users, posts, comments, emptyLabels int64
 	var minX, maxX, minY, maxY, minZ, maxZ float64
 	err = tx.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE type='subreddit'),count(*) FILTER(WHERE type='user'),
 count(*) FILTER(WHERE type='post'),count(*) FILTER(WHERE type='comment'),count(*) FILTER(WHERE btrim(label)=''),
@@ -523,7 +528,16 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_links WHERE catalog_id=$1`, catalogID).Scan(&links)
 	}
 	if err == nil {
-		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM spatial_catalog_documents WHERE catalog_id=$1`, catalogID).Scan(&documents)
+		err = tx.QueryRowContext(ctx, `SELECT count(*),
+ count(*) FILTER(WHERE entity_type='subreddit'),count(*) FILTER(WHERE entity_type='post'),count(*) FILTER(WHERE entity_type='comment')
+ FROM spatial_catalog_documents WHERE catalog_id=$1`, catalogID).Scan(&documents, &documentSubreddits, &documentPosts, &documentComments)
+	}
+	if err == nil {
+		err = tx.QueryRowContext(ctx, `SELECT count(*)
+ FROM spatial_catalog_documents document
+ LEFT JOIN spatial_catalog_entities entity
+   ON entity.catalog_id=document.catalog_id AND entity.id=document.entity_id AND entity.type=document.entity_type
+ WHERE document.catalog_id=$1 AND entity.id IS NULL`, catalogID).Scan(&documentMismatches)
 	}
 	if err != nil {
 		return failTx("counts", err)
@@ -539,9 +553,17 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 	err = tx.QueryRowContext(ctx, `SELECT
 	(SELECT count(*) FROM subreddits WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1),
 	(SELECT count(*) FROM users u WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=u.id)),
-	(SELECT count(*) FROM posts p WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)),
-	(SELECT count(*) FROM comments c JOIN posts p ON p.id=c.post_id
-	 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1 AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1
+	(SELECT count(*) FROM posts p
+	 JOIN subreddits s ON s.id=p.subreddit_id
+	 WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1
+	 AND COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $1
+	 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)),
+	(SELECT count(*) FROM comments c
+	 JOIN posts p ON p.id=c.post_id
+	 JOIN subreddits s ON s.id=p.subreddit_id
+	 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $1
+	 AND COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $1
+	 AND COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $1
 	 AND NOT EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=c.author_id OR b.user_id=p.author_id)),
 	(SELECT count(*) FROM catalog_automated_users),
 	(SELECT count(*) FROM posts p WHERE COALESCE(updated_at,created_at,to_timestamp(0)) <= $1 AND EXISTS (SELECT 1 FROM catalog_automated_users b WHERE b.user_id=p.author_id)),
@@ -554,10 +576,10 @@ FROM spatial_catalog_entities WHERE catalog_id=$1`, catalogID).Scan(
 	}
 	expectedEntities := expectedSubreddits + expectedUsers + expectedPosts + expectedComments
 	expectedDocuments := expectedSubreddits + expectedPosts + expectedComments
-	if entities != expectedEntities || documents != expectedDocuments || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
+	if entities != expectedEntities || documents != expectedDocuments || documentSubreddits != expectedSubreddits || documentPosts != expectedPosts || documentComments != expectedComments || documentMismatches != 0 || subreddits != expectedSubreddits || users != expectedUsers || posts != expectedPosts || comments != expectedComments ||
 		entities == 0 || links == 0 || emptyLabels != 0 || orphanLinks != 0 || minX == maxX || minY == maxY || minZ == maxZ ||
 		minX < -1e12 || maxX > 1e12 || minY < -1e12 || maxY > 1e12 || minZ < -1e12 || maxZ > 1e12 {
-		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d documents=%d expected=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, documents, expectedEntities, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
+		return failTx("validation", fmt.Errorf("invalid full spatial catalog: entities=%d documents=%d expected=%d document_types=[%d,%d,%d] document_mismatches=%d types=[%d,%d,%d,%d] expected_types=[%d,%d,%d,%d] links=%d empty_labels=%d orphan_links=%d bounds=[%g,%g,%g,%g,%g,%g]", entities, documents, expectedEntities, documentSubreddits, documentPosts, documentComments, documentMismatches, subreddits, users, posts, comments, expectedSubreddits, expectedUsers, expectedPosts, expectedComments, links, emptyLabels, orphanLinks, minX, maxX, minY, maxY, minZ, maxZ))
 	}
 	_, err = tx.ExecContext(ctx, `WITH metric_values AS (
  SELECT type,
