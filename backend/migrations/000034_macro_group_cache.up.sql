@@ -1,6 +1,5 @@
--- Compatibility table for previously staged provider-grouping artifacts. The
--- corrected affinity builder does not read or write this table; keep it during
--- the rollback window because production already contains the additive object.
+-- Cache for LLM macro-grouping results, keyed by the evidence fingerprint so
+-- re-running a shadow build at the same watermark reuses a validated grouping.
 CREATE TABLE macro_group_cache (
   evidence_fingerprint TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
