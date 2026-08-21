@@ -44,7 +44,7 @@ normalized_schema=${output_dir}/schema-29-36.normalized.sql
 inventory=${output_dir}/schema-29-36.inventory.tsv
 pointers=${output_dir}/publication-pointers.tsv
 
-pg_dump "${database_url}" --schema-only --no-owner --no-comments \
+pg_dump "${database_url}" --schema-only --no-owner --no-acl --no-comments \
   | sed -E '/^--/d; /^SET /d; /^SELECT pg_catalog.set_config/d; /^\\(un)?restrict /d; /^[[:space:]]*$/d' \
   >"${normalized_schema}"
 schema_sha256=$(sha256sum "${normalized_schema}" | awk '{print $1}')
