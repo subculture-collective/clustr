@@ -239,3 +239,7 @@ Key environment variables (selected):
 
 See `docs/visualization-modes.md` and `docs/community-detection.md` for feature details.
 See `frontend/README.md` for local dev and env hints.
+
+## License
+
+Licensed under `GPL-3.0-or-later`. See [LICENSE](LICENSE).
