@@ -120,7 +120,23 @@ WHERE state = 'leased' AND lease_expires_at < now()`); err != nil {
 		return CrawlAttempt{}, err
 	}
 
-	const claim = `WITH due AS (
+	cfg := config.Load()
+	var recentBacklogAttempts int
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM crawl_attempts a
+JOIN crawl_requests r ON r.id = a.request_id
+WHERE r.activation_cohort = 'backlog'
+  AND a.started_at >= now() - $1::interval`, cfg.BacklogActivationWindow.String()).Scan(&recentBacklogAttempts)
+	if err != nil {
+		return CrawlAttempt{}, err
+	}
+	// Once the hourly allowance is spent, restrict the claim to the indexed
+	// active cohort. The combined predicate scans the entire imported backlog.
+	cohortPredicate := "r.activation_cohort IN ('active', 'backlog')"
+	if recentBacklogAttempts >= cfg.BacklogActivationLimit {
+		cohortPredicate = "r.activation_cohort = 'active'"
+	}
+
+	claim := fmt.Sprintf(`WITH due AS (
   SELECT r.id, r.subreddit_id,
 	         -- A complete or partial attempt starts a fresh retry generation.
 	         -- Historical failures must not permanently exhaust future recurring
@@ -132,12 +148,7 @@ WHERE state = 'leased' AND lease_expires_at < now()`); err != nil {
   FROM crawl_requests r
   WHERE r.enabled AND r.next_due_at <= now()
     AND NOT EXISTS (SELECT 1 FROM crawl_attempts active WHERE active.request_id = r.id AND active.state = 'leased' AND active.lease_expires_at >= now())
-	AND (r.activation_cohort = 'active' OR (
-	  SELECT count(*) FROM crawl_attempts recent
-	  JOIN crawl_requests recent_request ON recent_request.id = recent.request_id
-	  WHERE recent_request.activation_cohort = 'backlog'
-	    AND recent.started_at >= now() - $4::interval
-	) < $5)
+	AND %s
 	AND COALESCE((SELECT MAX(a.retry_number) + 1 FROM crawl_attempts a
 	              WHERE a.request_id = r.id
 	                AND a.state = 'retryable_failure'
@@ -151,11 +162,10 @@ WHERE state = 'leased' AND lease_expires_at < now()`); err != nil {
   RETURNING id, request_id, retry_number
 )
 SELECT created.id, created.request_id, due.subreddit_id, created.retry_number
-FROM created JOIN due ON due.id = created.request_id`
+FROM created JOIN due ON due.id = created.request_id`, cohortPredicate)
 	var attempt CrawlAttempt
-	maxRetryNumber := config.Load().CrawlMaxAttempts - 1
-	cfg := config.Load()
-	err = tx.QueryRowContext(ctx, claim, workerID, maxRetryNumber, cfg.CrawlLeaseDuration.String(), cfg.BacklogActivationWindow.String(), cfg.BacklogActivationLimit).Scan(&attempt.ID, &attempt.RequestID, &attempt.SubredditID, &attempt.RetryNumber)
+	maxRetryNumber := cfg.CrawlMaxAttempts - 1
+	err = tx.QueryRowContext(ctx, claim, workerID, maxRetryNumber, cfg.CrawlLeaseDuration.String()).Scan(&attempt.ID, &attempt.RequestID, &attempt.SubredditID, &attempt.RetryNumber)
 	if err != nil {
 		return CrawlAttempt{}, err
 	}
