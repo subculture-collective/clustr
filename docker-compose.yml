@@ -1,0 +1,104 @@
+networks:
+  projects:
+    name: projects
+    external: true
+
+volumes:
+  pgbackups:
+
+services:
+  clustr-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clustr-api
+    networks: [projects]
+    env_file: .env
+    volumes:
+      - pgbackups:/app/backups:ro
+    healthcheck:
+      test: ['CMD', 'bash', '-c', 'curl -f http://localhost:8000/health | jq -e .status > /dev/null']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    restart: unless-stopped
+
+  clustr-crawler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.crawler
+    container_name: clustr-crawler
+    networks: [projects]
+    env_file: .env
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    restart: unless-stopped
+
+  clustr-precalculate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.precalculate
+    container_name: clustr-precalculate
+    networks: [projects]
+    env_file: .env
+    mem_limit: 4g
+    memswap_limit: 6g
+    command: >
+      sh -c "
+      while :; do
+        /app/precalculate || echo 'Precalculation failed';
+        sleep 3600;
+      done"
+    volumes:
+      - ./backend/scripts:/app/scripts
+      - pgbackups:/app/backups
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    restart: unless-stopped
+
+  clustr-gpu-compute:
+    build:
+      context: ./gpu-compute
+      dockerfile: Dockerfile
+    container_name: clustr-gpu-compute
+    networks: [projects]
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NUMBA_CUDA_USE_NVIDIA_BINDING=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    mem_limit: 4g
+    memswap_limit: 6g
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:8080/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    restart: unless-stopped
+
+  clustr-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: clustr-frontend
+    networks: [projects]
+    env_file: .env
+    depends_on:
+      clustr-api:
+        condition: service_healthy
+    labels:
+      - com.centurylabs.watchtower.enable=false
+    restart: unless-stopped

@@ -2,7 +2,6 @@ package affinity
 
 import (
 	"errors"
-	"log"
 	"math/rand/v2"
 	"slices"
 	"sort"
@@ -162,9 +161,6 @@ func SelectFinePartition(layers []GraphLayer, weights []float64, resolutions []f
 			return Partition{}, FinePartitionQuality{}, err
 		}
 		quality := AssessFinePartition(partition.Communities, len(nodes))
-		log.Printf("DIAG resolution=%.2f nodes=%d communities=%d modularity=%.4f nonsingleton=%.4f singleton=%.4f median=%.1f valid=%v",
-			resolution, len(nodes), len(partition.Communities), partition.Modularity,
-			quality.NonSingletonNodeFraction, quality.SingletonFraction, quality.MedianClusterSize, quality.Valid)
 		if quality.Valid && (!found || partition.Modularity > best.Modularity) {
 			best, bestQuality, found = partition, quality, true
 		}

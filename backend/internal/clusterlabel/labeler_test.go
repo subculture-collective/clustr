@@ -28,7 +28,7 @@ func TestNoProviderPublishesDeterministicEvidenceLabel(t *testing.T) {
 	}
 }
 
-func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
+func TestProviderSchemaConstrainsGrounding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			ResponseFormat struct {
@@ -53,17 +53,15 @@ func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
 		if len(grounding.Items.Enum) != 4 {
 			t.Fatalf("grounding enum = %v", grounding.Items.Enum)
 		}
-		var method struct {
-			Const string `json:"const"`
-		}
-		if err := json.Unmarshal(request.ResponseFormat.JSONSchema.Schema.Properties["method_version"], &method); err != nil {
-			t.Fatal(err)
-		}
-		if method.Const != clusterlabel.PromptVersion {
-			t.Fatalf("method const = %q", method.Const)
+		// method_version must not be requested from the provider; it is set
+		// server-side. Some providers (e.g. gemini via OpenRouter) ignore the
+		// const constraint and echo an arbitrary value, which previously broke
+		// validation.
+		if _, present := request.ResponseFormat.JSONSchema.Schema.Properties["method_version"]; present {
+			t.Fatal("method_version must not be in the schema")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"display_name\":\"Maker Commons\",\"evidence_grounding\":[\"woodworking\",\"maker\"],\"confidence\":0.9,\"method_version\":\"cluster-label-v1\"}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"display_name\":\"Maker Commons\",\"evidence_grounding\":[\"woodworking\",\"maker\"],\"confidence\":0.9}"}}]}`))
 	}))
 	defer server.Close()
 
@@ -74,6 +72,9 @@ func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
 	}
 	if result.Method != "provider" || result.DisplayName != "Maker Commons" || result.Grounding != "woodworking · maker" {
 		t.Fatalf("unexpected provider result: %+v", result)
+	}
+	if result.MethodVersion != clusterlabel.PromptVersion {
+		t.Fatalf("method version = %q, want %q", result.MethodVersion, clusterlabel.PromptVersion)
 	}
 }
 

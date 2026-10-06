@@ -9,9 +9,10 @@ Requires=docker.service
 Type=oneshot
 User=onnwee
 Group=onnwee
+Environment=HOME=/home/onnwee
 EnvironmentFile=/etc/clustr/kvant-precalculate.env
-ExecStart=/opt/clustr/deploy/kvant/run-precalculation.sh /etc/clustr/kvant-precalculate.env
-TimeoutStartSec=45min
+ExecStart=/opt/clustr/deploy/kvant/run-precalculation.sh /etc/clustr/kvant-precalculate.env graph-revision
+TimeoutStartSec=2h
 TimeoutStopSec=2min
 Nice=10
 IOSchedulingClass=best-effort
@@ -20,7 +21,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/run/user/1000
-
-[Install]
-WantedBy=multi-user.target
+ReadWritePaths=/run/user/1000 /home/onnwee/.local/state/clustr

@@ -15,6 +15,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/clusterlabel"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/macrocluster"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/presentation"
 )
 
@@ -42,7 +43,7 @@ func BuildShadow(ctx context.Context, database *sql.DB, watermark time.Time) (in
 		return 0, fmt.Errorf("create affinity build: %w", err)
 	}
 	fail := func(stage string, cause error) (int64, error) {
-		_, _ = database.ExecContext(context.Background(), `UPDATE affinity_builds SET status='failed',failure_reason=$2,validation_result=jsonb_build_object('valid',false,'stage',$3),completed_at=now() WHERE id=$1`, buildID, cause.Error(), stage)
+		_, _ = database.ExecContext(context.Background(), `UPDATE affinity_builds SET status='failed',failure_reason=$2,validation_result=jsonb_build_object('valid',false,'stage',$3::text),completed_at=now() WHERE id=$1`, buildID, cause.Error(), stage)
 		return buildID, fmt.Errorf("affinity shadow %d at %s: %w", buildID, stage, cause)
 	}
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
@@ -139,12 +140,16 @@ ORDER BY c.source_id,c.target_id`, watermark)
 		return fail("fine_partition", err)
 	}
 	communityIDs := stableCommunityIDs(ctx, tx, fine.Communities)
-	macro, err := selectMacroPartition(retained, fine.Communities, communityIDs)
+	semantic, err := loadSemanticContext(ctx, tx, retained)
+	if err != nil {
+		return fail("semantic_context", err)
+	}
+	macro, err := selectMacroPartition(ctx, tx, fine.Communities, semantic)
 	if err != nil {
 		return fail("macro_partition", err)
 	}
 	macroIdentities := stableMacroIdentities(ctx, tx, fine.Communities, communityIDs, macro)
-	if err = persistCommunities(ctx, tx, buildID, retained, fine, quality, communityIDs, macro, macroIdentities); err != nil {
+	if err = persistCommunities(ctx, tx, buildID, retained, fine, quality, communityIDs, macro, macroIdentities, semantic); err != nil {
 		return fail("community_presentation", err)
 	}
 	if err = recordIdentityEvents(ctx, tx, buildID); err != nil {
@@ -155,7 +160,7 @@ ORDER BY c.source_id,c.target_id`, watermark)
 		effective[string(layer.Name)] = weights[index]
 	}
 	effectiveJSON, _ := json.Marshal(effective)
-	validation, _ := json.Marshal(map[string]any{"valid": true, "edge_count": len(retained), "fine_resolution": fine.Resolution, "fine_modularity": fine.Modularity, "fine_quality": quality, "macro_group_count": len(macro.groups), "macro_resolution": macro.resolution, "current_pointers_unchanged": true})
+	validation, _ := json.Marshal(map[string]any{"valid": true, "edge_count": len(retained), "fine_resolution": fine.Resolution, "fine_modularity": fine.Modularity, "fine_quality": quality, "macro_group_count": len(macro.groups), "macro_grouping_method": macro.method, "current_pointers_unchanged": true})
 	if _, err = tx.ExecContext(ctx, `UPDATE affinity_builds SET status='validated',effective_weights=$2::jsonb,validation_result=$3::jsonb,completed_at=now() WHERE id=$1`, buildID, string(effectiveJSON), string(validation)); err != nil {
 		return fail("validate", err)
 	}
@@ -307,49 +312,108 @@ type macroPartition struct {
 	groups                 [][]int64
 	communityToMacro       map[int]int
 	resolution, modularity float64
+	method                 string
 }
 
-func selectMacroPartition(pairs []stagedPair, communities [][]int64, ids []string) (macroPartition, error) {
-	nodeCommunity := map[int64]int{}
-	for index, members := range communities {
-		for _, member := range members {
-			nodeCommunity[member] = index
-		}
+// semanticContext carries the aggregate subreddit evidence needed for both
+// LLM macro grouping and label generation. Computed once before the macro
+// partition and reused by persistCommunities.
+type semanticContext struct {
+	nodeStrength      map[int64]float64
+	metadata          map[int64]subredditMetadata
+	documentFrequency map[string]int
+}
+
+func loadSemanticContext(ctx context.Context, tx *sql.Tx, pairs []stagedPair) (semanticContext, error) {
+	contextData := semanticContext{
+		nodeStrength:      map[int64]float64{},
+		metadata:          map[int64]subredditMetadata{},
+		documentFrequency: map[string]int{},
 	}
-	weights := map[[2]int]float64{}
 	for _, pair := range pairs {
-		a, b := nodeCommunity[pair.a], nodeCommunity[pair.b]
-		if a == b {
-			continue
-		}
-		if a > b {
-			a, b = b, a
-		}
-		weights[[2]int{a, b}] += pair.score.Affinity
+		contextData.nodeStrength[pair.a] += pair.score.Affinity
+		contextData.nodeStrength[pair.b] += pair.score.Affinity
 	}
-	layer := GraphLayer{Name: ActiveUsers}
-	for key, weight := range weights {
-		layer.Edges = append(layer.Edges, WeightedEdge{A: int64(key[0] + 1), B: int64(key[1] + 1), Weight: weight})
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,COALESCE(title,''),COALESCE(description,'') FROM subreddits`)
+	if err != nil {
+		return semanticContext{}, err
 	}
-	best := macroPartition{}
-	for _, resolution := range []float64{.05, .1, .2, .35, .5, .75, 1, 1.5, 2, 3} {
-		partition, err := PartitionMultiplex([]GraphLayer{layer}, []float64{1}, resolution, PublicationSeed+1)
-		if err != nil {
-			return macroPartition{}, err
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var item subredditMetadata
+		if err := rows.Scan(&id, &item.name, &item.title, &item.description); err != nil {
+			return semanticContext{}, err
 		}
-		if len(partition.Communities) >= 8 && len(partition.Communities) <= 12 && (len(best.groups) == 0 || partition.Modularity > best.modularity) {
-			best.groups = partition.Communities
-			best.resolution = resolution
-			best.modularity = partition.Modularity
+		contextData.metadata[id] = item
+		seen := map[string]bool{}
+		for _, token := range topicTokens(item.name + " " + item.title + " " + item.description) {
+			seen[token] = true
+		}
+		for token := range seen {
+			contextData.documentFrequency[token]++
 		}
 	}
-	if len(best.groups) == 0 {
-		return macroPartition{}, errors.New("no macro resolution produced 8-12 groups")
+	return contextData, rows.Err()
+}
+
+// communitySummaries extracts the per-community semantic summaries (top
+// representative subreddit names and TF-IDF topics) used as LLM grouping input.
+func communitySummaries(communities [][]int64, semantic semanticContext) []macrocluster.Community {
+	summaries := make([]macrocluster.Community, len(communities))
+	for index, members := range communities {
+		representativeIDs := topRepresentativeMembers(members, semantic.nodeStrength, semantic.metadata, 6)
+		representatives := make([]string, 0, len(representativeIDs))
+		for _, id := range representativeIDs {
+			representatives = append(representatives, semantic.metadata[id].name)
+		}
+		summaries[index] = macrocluster.Community{
+			Index:           index,
+			Representatives: representatives,
+			Topics:          tfidfTopics(members, semantic.metadata, semantic.documentFrequency, len(semantic.metadata), 6),
+		}
 	}
+	return summaries
+}
+
+// generateCachedMacroGroups reuses a cached partition for the same community
+// evidence, otherwise calls the LLM and stores the result. Caching is keyed by
+// the evidence fingerprint so a shadow rebuild at the same watermark is stable
+// and cheap.
+func generateCachedMacroGroups(ctx context.Context, tx *sql.Tx, communities []macrocluster.Community, config macrocluster.Config) macrocluster.Result {
+	fingerprint := macrocluster.Fingerprint(communities)
+	model := config.Model
+	if model == "" {
+		model = "none"
+	}
+	var resultJSON []byte
+	err := tx.QueryRowContext(ctx, `SELECT result FROM macro_group_cache WHERE evidence_fingerprint=$1 AND prompt_version=$2 AND provider_model=$3 AND policy_version=$4`, fingerprint, macrocluster.PromptVersion, model, macrocluster.PolicyVersion).Scan(&resultJSON)
+	if err == nil {
+		var cached macrocluster.Result
+		if json.Unmarshal(resultJSON, &cached) == nil && len(cached.Groups) > 0 {
+			if cached.Method == "" {
+				cached.Method = "provider"
+			}
+			return cached
+		}
+	}
+	result, _ := macrocluster.Group(ctx, communities, config)
+	payload, _ := json.Marshal(map[string]any{"groups": result.Groups, "method": result.Method})
+	_, _ = tx.ExecContext(ctx, `INSERT INTO macro_group_cache(evidence_fingerprint,prompt_version,provider_model,policy_version,result) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT DO NOTHING`, fingerprint, macrocluster.PromptVersion, model, macrocluster.PolicyVersion, string(payload))
+	return result
+}
+
+func selectMacroPartition(ctx context.Context, tx *sql.Tx, communities [][]int64, semantic semanticContext) (macroPartition, error) {
+	summaries := communitySummaries(communities, semantic)
+	config := macrocluster.Config{BaseURL: os.Getenv("CLUSTER_LABEL_BASE_URL"), APIKey: os.Getenv("CLUSTER_LABEL_API_KEY"), Model: os.Getenv("CLUSTER_LABEL_MODEL")}
+	result := generateCachedMacroGroups(ctx, tx, summaries, config)
+	best := macroPartition{method: result.Method}
+	best.groups = make([][]int64, len(result.Groups))
 	best.communityToMacro = map[int]int{}
-	for macro, members := range best.groups {
-		for _, member := range members {
-			best.communityToMacro[int(member)-1] = macro
+	for macro, members := range result.Groups {
+		for _, communityIndex := range members {
+			best.groups[macro] = append(best.groups[macro], int64(communityIndex+1))
+			best.communityToMacro[communityIndex] = macro
 		}
 	}
 	return best, nil
@@ -501,34 +565,7 @@ JOIN graph_revision_macro_groups g ON g.revision_id=c.revision_id AND g.macro_gr
 func sha256Bytes(value string) []byte { sum := sha256Sum([]byte(value)); return sum[:] }
 func sha256Sum(value []byte) [32]byte { return sha256.Sum256(value) }
 
-func persistCommunities(ctx context.Context, tx *sql.Tx, buildID int64, pairs []stagedPair, fine Partition, quality FinePartitionQuality, ids []string, macro macroPartition, macroIdentities []macroIdentity) error {
-	nodeStrength := map[int64]float64{}
-	for _, pair := range pairs {
-		nodeStrength[pair.a] += pair.score.Affinity
-		nodeStrength[pair.b] += pair.score.Affinity
-	}
-	metadata := map[int64]subredditMetadata{}
-	documentFrequency := map[string]int{}
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,COALESCE(title,''),COALESCE(description,'') FROM subreddits`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var id int64
-		var item subredditMetadata
-		if err := rows.Scan(&id, &item.name, &item.title, &item.description); err != nil {
-			return err
-		}
-		metadata[id] = item
-		seen := map[string]bool{}
-		for _, token := range topicTokens(item.name + " " + item.title + " " + item.description) {
-			seen[token] = true
-		}
-		for token := range seen {
-			documentFrequency[token]++
-		}
-	}
-	rows.Close()
+func persistCommunities(ctx context.Context, tx *sql.Tx, buildID int64, pairs []stagedPair, fine Partition, quality FinePartitionQuality, ids []string, macro macroPartition, macroIdentities []macroIdentity, semantic semanticContext) error {
 	labelConfig := clusterlabel.Config{BaseURL: os.Getenv("CLUSTER_LABEL_BASE_URL"), APIKey: os.Getenv("CLUSTER_LABEL_API_KEY"), Model: os.Getenv("CLUSTER_LABEL_MODEL")}
 	clusterOfNode := map[int64]int{}
 	for cluster, members := range fine.Communities {
@@ -558,15 +595,15 @@ func persistCommunities(ctx context.Context, tx *sql.Tx, buildID int64, pairs []
 		for _, communityNode := range members {
 			communityIndex := int(communityNode) - 1
 			if communityIndex >= 0 && communityIndex < len(fine.Communities) {
-				for _, node := range topRepresentativeMembers(fine.Communities[communityIndex], nodeStrength, metadata, 2) {
-					representatives = append(representatives, metadata[node].name)
+				for _, node := range topRepresentativeMembers(fine.Communities[communityIndex], semantic.nodeStrength, semantic.metadata, 2) {
+					representatives = append(representatives, semantic.metadata[node].name)
 				}
 			}
 		}
 		labelEvidence := clusterlabel.Evidence{Representatives: representatives}
 		label := uniqueLabel(generateCachedLabel(ctx, tx, labelEvidence, labelConfig), labelEvidence, usedNames)
 		macroLabels[index] = label
-		metrics, _ := json.Marshal(map[string]any{"community_count": len(members), "resolution": macro.resolution, "representative_subreddits": representatives})
+		metrics, _ := json.Marshal(map[string]any{"community_count": len(members), "grouping_method": macro.method, "representative_subreddits": representatives})
 		identity := macroIdentities[index]
 		if _, err := tx.ExecContext(ctx, `INSERT INTO affinity_build_macro_groups(build_id,macro_group_id,display_name,evidence_label,palette_role,primary_color,evidence_metrics) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, buildID, identity.ID, label.DisplayName, label.EvidenceLabel, identity.PaletteRole, identity.Color, string(metrics)); err != nil {
 			return err
@@ -574,15 +611,15 @@ func persistCommunities(ctx context.Context, tx *sql.Tx, buildID int64, pairs []
 	}
 	for index, members := range fine.Communities {
 		macroIndex := macro.communityToMacro[index]
-		representativeIDs := topRepresentativeMembers(members, nodeStrength, metadata, 12)
+		representativeIDs := topRepresentativeMembers(members, semantic.nodeStrength, semantic.metadata, 12)
 		representatives := make([]string, 0, len(representativeIDs))
 		for _, id := range representativeIDs {
-			representatives = append(representatives, metadata[id].name)
+			representatives = append(representatives, semantic.metadata[id].name)
 		}
-		topics := tfidfTopics(members, metadata, documentFrequency, len(metadata), 12)
+		topics := tfidfTopics(members, semantic.metadata, semantic.documentFrequency, len(semantic.metadata), 12)
 		labelEvidence := clusterlabel.Evidence{Representatives: representatives, Topics: topics, NeighborMacroGroups: []string{macroLabels[macroIndex].DisplayName}, Metrics: map[string]float64{"size": float64(len(members))}}
 		label := uniqueLabel(generateCachedLabel(ctx, tx, labelEvidence, labelConfig), labelEvidence, usedNames)
-		distinctiveness := math.Min(1, averageStrength(members, nodeStrength)/(1+averageStrength(members, nodeStrength)))
+		distinctiveness := math.Min(1, averageStrength(members, semantic.nodeStrength)/(1+averageStrength(members, semantic.nodeStrength)))
 		confidence := math.Min(1, float64(len(members))/20)
 		var totalAffinity, primaryAffinity, secondaryAffinity float64
 		secondaryMacro := -1

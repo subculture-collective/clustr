@@ -132,9 +132,10 @@ image before starting the full catalog/revision calculation with bounded CPU
 and memory. The database credential is composed from the protected clone
 password through an ephemeral file descriptor rather than stored in another
 environment file.
-On Kvant, the supported calculation profile gives PostgreSQL 16 CPUs and a
-an enlarged shared-memory mount, and sets `SPATIAL_CATALOG_PARALLEL_WORKERS=12` for
-large catalog queries. Keep the application default at zero on hosts that have
+On Kvant, the supported calculation profile gives PostgreSQL 16 CPUs and an
+8 GiB shared-memory mount, and sets `SPATIAL_CATALOG_PARALLEL_WORKERS=12` for
+large catalog queries. The shared-memory size is an allocation ceiling rather
+than reserved memory. Keep the application default at zero on hosts that have
 not explicitly enlarged the database container's `/dev/shm`.
 After a catalog-only failure, an operator may use `--publish-existing` to reuse
 an already completed graph workspace. This mode still rebuilds and validates

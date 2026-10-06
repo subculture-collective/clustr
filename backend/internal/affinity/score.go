@@ -109,14 +109,31 @@ func scoreLayer(layer Layer) Component {
 	if denominator > 0 {
 		npmi = math.Log(joint/(left*right)) / denominator
 	}
-	if !finite(npmi) || npmi < 0 {
+	if !finite(npmi) {
 		npmi = 0
-	} else if npmi > 1 {
-		npmi = 1
+	}
+	positive := npmi
+	if positive < 0 {
+		positive = 0
+	} else if positive > 1 {
+		positive = 1
+	}
+	// Negative NPMI indicates an observed co-occurrence below the independence
+	// baseline. Clamping to zero would drop such edges entirely, fragmenting a
+	// scale-free graph into many small connected components. Map negative NPMI
+	// to a tiny positive value so the edge survives for connectivity without
+	// meaningfully contributing to community structure. The exponential decay
+	// preserves the ordering so more anti-correlated pairs get even smaller
+	// weights.
+	effective := npmi
+	if effective < 0 {
+		effective = math.Exp(effective) * 1e-4
+	} else if effective > 1 {
+		effective = 1
 	}
 	shrinkage := layer.Observed / (layer.Observed + 5)
-	raw := npmi * math.Log1p(layer.Observed) * shrinkage
-	return Component{Observed: layer.Observed, PositiveNPMI: npmi, Shrinkage: shrinkage, Raw: raw}
+	raw := effective * math.Log1p(layer.Observed) * shrinkage
+	return Component{Observed: layer.Observed, PositiveNPMI: positive, Shrinkage: shrinkage, Raw: raw}
 }
 
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }

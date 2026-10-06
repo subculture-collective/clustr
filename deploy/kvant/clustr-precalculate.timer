@@ -2,8 +2,9 @@
 Description=Publish Clustr graph revisions hourly on Kvant
 
 [Timer]
-OnCalendar=hourly
-Persistent=true
+OnActiveSec=1h
+OnUnitInactiveSec=1h
+Persistent=false
 RandomizedDelaySec=5m
 Unit=clustr-precalculate.service
 

@@ -1,0 +1,23 @@
+[Unit]
+Description=Preflight Clustr spatial-catalog capacity from Kvant (no rebuild)
+Documentation=file:///opt/clustr/docs/runbooks/almaz-kvant-launch.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=onnwee
+Group=onnwee
+Environment=HOME=/home/onnwee
+EnvironmentFile=/etc/clustr/kvant-precalculate.env
+ExecStart=/opt/clustr/deploy/kvant/run-precalculation.sh /etc/clustr/kvant-precalculate.env catalog-preflight
+TimeoutStartSec=2min
+TimeoutStopSec=30s
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/user/1000 /home/onnwee/.local/state/clustr

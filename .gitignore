@@ -136,3 +136,7 @@ vendor/
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+# BEGIN Blacktower deepwork
+.blacktower/deepwork/
+# END Blacktower deepwork

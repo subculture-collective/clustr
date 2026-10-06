@@ -25,7 +25,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
 	var watermark time.Time
 	if *watermarkFlag != "" {

@@ -1,0 +1,20 @@
+[Unit]
+Description=Publish one bounded Clustr graph revision from Kvant
+Documentation=file:///home/onnwee/.local/share/doc/clustr/almaz-kvant-launch.md
+After=default.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/home/onnwee
+EnvironmentFile=/home/onnwee/.config/clustr/kvant-precalculate.env
+ExecStart=/home/onnwee/.local/libexec/clustr/run-precalculation.sh /home/onnwee/.config/clustr/kvant-precalculate.env graph-revision
+TimeoutStartSec=2h
+TimeoutStopSec=2min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t /home/onnwee/.local/state/clustr
