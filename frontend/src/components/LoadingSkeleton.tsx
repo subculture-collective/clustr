@@ -13,11 +13,11 @@ const LoadingSkeleton = () => {
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="relative w-full h-full max-w-7xl max-h-[600px] mx-auto">
           {/* Skeleton nodes - pulsing circles */}
-          <div className="absolute top-1/4 left-1/4 w-16 h-16 rounded-full bg-gradient-to-br from-green-500/30 to-green-600/10 animate-pulse" />
-          <div className="absolute top-1/3 right-1/3 w-12 h-12 rounded-full bg-gradient-to-br from-blue-500/30 to-blue-600/10 animate-pulse delay-75" />
-          <div className="absolute bottom-1/3 left-1/3 w-20 h-20 rounded-full bg-gradient-to-br from-green-500/30 to-green-600/10 animate-pulse delay-150" />
-          <div className="absolute bottom-1/4 right-1/4 w-14 h-14 rounded-full bg-gradient-to-br from-blue-500/30 to-blue-600/10 animate-pulse delay-100" />
-          <div className="absolute top-1/2 left-1/2 w-24 h-24 rounded-full bg-gradient-to-br from-green-500/30 to-green-600/10 animate-pulse delay-200" />
+          <div className="absolute top-1/4 left-1/4 w-16 h-16 rounded-full bg-linear-to-br from-green-500/30 to-green-600/10 animate-pulse" />
+          <div className="absolute top-1/3 right-1/3 w-12 h-12 rounded-full bg-linear-to-br from-blue-500/30 to-blue-600/10 animate-pulse delay-75" />
+          <div className="absolute bottom-1/3 left-1/3 w-20 h-20 rounded-full bg-linear-to-br from-green-500/30 to-green-600/10 animate-pulse delay-150" />
+          <div className="absolute bottom-1/4 right-1/4 w-14 h-14 rounded-full bg-linear-to-br from-blue-500/30 to-blue-600/10 animate-pulse delay-100" />
+          <div className="absolute top-1/2 left-1/2 w-24 h-24 rounded-full bg-linear-to-br from-green-500/30 to-green-600/10 animate-pulse delay-200" />
           
           {/* Skeleton links - faint lines */}
           <svg className="absolute inset-0 w-full h-full opacity-20">

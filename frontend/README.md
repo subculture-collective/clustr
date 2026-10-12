@@ -2,6 +2,8 @@
 
 This app renders the Reddit Cluster Map using `react-force-graph-3d`.
 
+Tailwind 4 requires Safari 16.4+, Chrome 111+, or Firefox 128+. The migration retains the v3 color palette and default border/placeholder styles; visual snapshots and production interaction tests remain enforced.
+
 ## Dev commands
 
 - Install deps: `npm ci`

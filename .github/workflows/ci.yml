@@ -6,23 +6,15 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: reddit_cluster_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,11 +42,14 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
-      - name: Run tests
+      - name: Run static security analysis
         working-directory: ./backend
-        env:
-          DATABASE_URL: postgres://postgres:postgres@postgres:5432/reddit_cluster_test?sslmode=disable
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.10
+          gosec -quiet -include=G101,G102,G103,G106,G107,G201,G202,G203,G204,G301,G302,G303,G305,G401,G402,G403,G405,G406,G407,G501,G502,G503,G504,G505,G506,G601,G602 ./...
+
+      - name: Run migrated database and race tests
+        run: bash scripts/test-backend-ci.sh
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -66,7 +61,11 @@ jobs:
 
   test-frontend:
     name: Test Frontend
+    permissions:
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -75,7 +74,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -107,9 +106,205 @@ jobs:
         working-directory: ./frontend
         run: npm run build
 
+      - name: Check bundle size
+        if: github.event_name == 'pull_request'
+        id: check_bundle_size
+        working-directory: ./frontend
+        run: npm run size
+        continue-on-error: true
+
+      - name: Save current bundle stats
+        if: github.event_name == 'pull_request'
+        working-directory: ./frontend
+        run: |
+          npm run --silent size:json > bundle-stats.json
+
+      - name: Upload bundle visualizer
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: bundle-stats
+          path: frontend/dist/stats.html
+          retention-days: 30
+
+      - name: Checkout base branch
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Set up Node.js for base
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies (base)
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: npm ci
+        continue-on-error: true
+
+      - name: Build bundle (base)
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: npm run build
+        continue-on-error: true
+
+      - name: Get base bundle stats
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: |
+          npm run --silent size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
+        continue-on-error: true
+
+      - name: Compare bundle sizes
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read stats files
+            let currentStats = [];
+            let baseStats = [];
+
+            try {
+              currentStats = JSON.parse(fs.readFileSync('frontend/bundle-stats.json', 'utf8'));
+            } catch (e) {
+              core.setFailed('Failed to read current bundle stats: ' + e.message);
+              return;
+            }
+
+            try {
+              baseStats = JSON.parse(fs.readFileSync('base/frontend/bundle-stats-base.json', 'utf8'));
+            } catch (e) {
+              console.log('No base stats available');
+            }
+
+            if (!Array.isArray(currentStats) || currentStats.length === 0 || currentStats.some(item => typeof item.name !== 'string' || !Number.isFinite(item.size) || !Number.isFinite(item.sizeLimit) || typeof item.passed !== 'boolean')) {
+              core.setFailed('Current bundle stats are empty or invalid');
+              return;
+            }
+
+            function formatSize(bytes) {
+              const abs = Math.abs(bytes);
+              if (abs < 1024) return `${abs.toFixed(0)} B`;
+              if (abs < 1024 * 1024) return `${(abs / 1024).toFixed(2)} KB`;
+              return `${(abs / (1024 * 1024)).toFixed(2)} MB`;
+            }
+
+            function formatDiff(current, base) {
+              if (!base || base === 0) return 'N/A';
+              const diff = current - base;
+              const pct = Math.abs((diff / base) * 100).toFixed(2);
+              const sign = diff > 0 ? '+' : diff < 0 ? '-' : '';
+              const emoji = diff > 0 ? '🔴' : diff < 0 ? '🟢' : '⚪';
+              return `${emoji} ${sign}${formatSize(diff)} (${sign}${pct}%)`;
+            }
+
+            let comment = '## 📦 Bundle Size Report\n\n';
+            comment += '| File | Current | Base | Diff |\n';
+            comment += '|------|---------|------|------|\n';
+
+            let anyExceeded = false;
+            let significantIncrease = false;
+
+            for (const item of currentStats) {
+              const baseItem = baseStats.find(b => b.name === item.name);
+              const baseSize = baseItem ? baseItem.size : null;
+
+              comment += `| ${item.name} | ${formatSize(item.size)} | ${baseSize ? formatSize(baseSize) : 'N/A'} | ${formatDiff(item.size, baseSize)} |\n`;
+
+              // Check if size exceeds limit
+              if (!item.passed) {
+                anyExceeded = true;
+              }
+
+              // Check for significant increases (>5% or >50KB)
+              if (baseSize) {
+                const diff = item.size - baseSize;
+                const pctIncrease = (diff / baseSize) * 100;
+
+                if (pctIncrease > 5 || diff > 50 * 1024) {
+                  significantIncrease = true;
+                }
+              }
+            }
+
+            comment += '\n';
+
+            // Report issues
+            if (anyExceeded) {
+              comment += '### ⚠️ Bundle Size Limit Exceeded\n\n';
+              for (const item of currentStats) {
+                if (!item.passed) {
+                  comment += `- ❌ ${item.name} (${formatSize(item.size)}) exceeds limit of ${formatSize(item.sizeLimit)}\n`;
+                }
+              }
+              comment += '\n';
+            }
+
+            if (significantIncrease && !anyExceeded) {
+              comment += '### ⚠️ Significant Bundle Size Increase\n\n';
+              for (const item of currentStats) {
+                const baseItem = baseStats.find(b => b.name === item.name);
+                if (baseItem) {
+                  const diff = item.size - baseItem.size;
+                  const pctIncrease = (diff / baseItem.size) * 100;
+
+                  if (pctIncrease > 5 || diff > 50 * 1024) {
+                    comment += `- ${item.name} increased by ${formatSize(diff)} (${pctIncrease.toFixed(2)}%), exceeding the threshold of 5% or 50KB\n`;
+                  }
+                }
+              }
+              comment += '\n';
+            }
+
+            comment += '\n📊 [View detailed bundle analysis](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
+
+            // Post or update comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Bundle Size Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+            // Fail if limits are exceeded
+            if (anyExceeded) {
+              core.setFailed('Bundle size exceeds configured limits');
+            }
+
+            // Fail on significant increases (>5% or >50KB)
+            if (significantIncrease && !anyExceeded) {
+              core.setFailed('Bundle size increased significantly (>5% or >50KB)');
+            }
+
   visual-regression:
     name: Visual Regression Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-frontend]
 
     steps:
@@ -119,7 +314,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -158,9 +353,11 @@ jobs:
   build-backend-images:
     name: Build Backend Docker Images
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-backend]
 
     strategy:
+      fail-fast: false
       matrix:
         component: [server, crawler, precalculate, migrate]
 
@@ -172,14 +369,14 @@ jobs:
         id: dockerfile
         run: |
           if [ "${{ matrix.component }}" = "server" ]; then
-            echo "file=Dockerfile" >> $GITHUB_OUTPUT
+            echo "file=Dockerfile" >> "$GITHUB_OUTPUT"
           else
-            echo "file=Dockerfile.${{ matrix.component }}" >> $GITHUB_OUTPUT
+            echo "file=Dockerfile.${{ matrix.component }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build Docker image
         run: |
-          docker build \
+          docker build --pull \
             --file "./backend/${{ steps.dockerfile.outputs.file }}" \
             --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
             --build-arg "VERSION=${{ github.ref_name }}" \
@@ -187,9 +384,17 @@ jobs:
             --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
             ./backend
 
+      - name: Scan the built server image
+        if: matrix.component == 'server'
+        run: |
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table reddit-cluster-${{ matrix.component }}:${{ github.sha }}
+
   build-frontend-image:
     name: Build Frontend Docker Image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-frontend]
 
     steps:
@@ -198,7 +403,37 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build \
+          docker build --pull \
             --file ./frontend/Dockerfile \
             --tag "reddit-cluster-frontend:${{ github.sha }}" \
             ./frontend
+
+      - name: Scan the built image
+        run: |
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table reddit-cluster-frontend:${{ github.sha }}
+
+  secrets:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Scan changed commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            gitleaks git --redact --log-opts="$BASE_SHA..HEAD"
+          else
+            gitleaks git --redact
+          fi
