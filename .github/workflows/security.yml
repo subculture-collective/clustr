@@ -167,7 +167,7 @@ jobs:
 
       - name: Build Docker image for scanning
         run: |
-          docker build \
+          docker build --pull \
             --file "${{ steps.dockerfile.outputs.path }}" \
             --tag "${{ matrix.component }}:scan" \
             "${{ steps.dockerfile.outputs.context }}"
