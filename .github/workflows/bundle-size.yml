@@ -44,7 +44,7 @@ jobs:
       - name: Save current bundle stats
         working-directory: ./frontend
         run: |
-          npm run size:json > bundle-stats.json
+          npm run --silent size:json > bundle-stats.json
 
       - name: Upload bundle visualizer
         uses: actions/upload-artifact@v3
@@ -77,7 +77,7 @@ jobs:
       - name: Get base bundle stats
         working-directory: ./base/frontend
         run: |
-          npm run size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
+          npm run --silent size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
         continue-on-error: true
 
       - name: Compare bundle sizes
@@ -93,7 +93,8 @@ jobs:
             try {
               currentStats = JSON.parse(fs.readFileSync('frontend/bundle-stats.json', 'utf8'));
             } catch (e) {
-              console.error('Failed to read current stats:', e);
+              core.setFailed('Failed to read current bundle stats: ' + e.message);
+              return;
             }
             
             try {
@@ -102,6 +103,11 @@ jobs:
               console.log('No base stats available');
             }
             
+            if (!Array.isArray(currentStats) || currentStats.length === 0 || currentStats.some(item => typeof item.name !== 'string' || !Number.isFinite(item.size) || !Number.isFinite(item.sizeLimit) || typeof item.passed !== 'boolean')) {
+              core.setFailed('Current bundle stats are empty or invalid');
+              return;
+            }
+
             function formatSize(bytes) {
               const abs = Math.abs(bytes);
               if (abs < 1024) return `${abs.toFixed(0)} B`;
@@ -176,7 +182,7 @@ jobs:
               comment += '\n';
             }
             
-            comment += '\n📊 [View detailed bundle analysis](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
+            comment += '\n📊 [View detailed bundle analysis](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
             
             // Post or update comment
             const { data: comments } = await github.rest.issues.listComments({

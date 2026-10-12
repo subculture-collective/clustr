@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"html/template"
@@ -31,7 +30,7 @@ func NewCatalogPageHandler(database db.DBTX) *CatalogPageHandler {
 
 type catalogPageData struct {
 	Title, Kind, ID, Summary, Canonical, Robots, Updated, ProvenanceJSON, SourceURL string
-	EntityJSON                                                                      template.JS
+	EntityJSON                                                                      map[string]any
 	Sensitive                                                                       bool
 }
 
@@ -104,10 +103,10 @@ func (h *CatalogPageHandler) Entity(w http.ResponseWriter, r *http.Request) {
 	if sensitive || r.URL.Query().Has("revision") {
 		robots = "noindex,follow"
 	}
-	entityLD, _ := json.Marshal(map[string]any{"@context": "https://schema.org", "@type": "CreativeWork", "name": firstNonempty(title, label), "identifier": id, "url": canonical, "dateModified": updated, "isAccessibleForFree": true})
+	entityLD := map[string]any{"@context": "https://schema.org", "@type": "CreativeWork", "name": firstNonempty(title, label), "identifier": id, "url": canonical, "dateModified": updated, "isAccessibleForFree": true}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Clustr-Revision", strconv.FormatInt(revisionID, 10))
-	_ = catalogPageTemplate.Execute(w, catalogPageData{Title: firstNonempty(title, label), Kind: kind, ID: id, Summary: summary, Canonical: canonical, Robots: robots, Updated: updated, ProvenanceJSON: string(provenance), EntityJSON: template.JS(entityLD), SourceURL: source, Sensitive: sensitive})
+	_ = catalogPageTemplate.Execute(w, catalogPageData{Title: firstNonempty(title, label), Kind: kind, ID: id, Summary: summary, Canonical: canonical, Robots: robots, Updated: updated, ProvenanceJSON: string(provenance), EntityJSON: entityLD, SourceURL: source, Sensitive: sensitive})
 }
 
 func firstNonempty(values ...string) string {
