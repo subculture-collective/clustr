@@ -39,7 +39,7 @@ export default function NodeTooltip({ nodeId, nodeName, nodeType, mouseX, mouseY
 
   return (
     <div
-      className="fixed z-30 bg-black/90 text-white px-3 py-2 rounded shadow-lg text-sm pointer-events-none"
+      className="fixed z-30 bg-black/90 text-white px-3 py-2 rounded-sm shadow-lg text-sm pointer-events-none"
       style={style}
     >
       <div className="font-semibold">{nodeName || nodeId}</div>

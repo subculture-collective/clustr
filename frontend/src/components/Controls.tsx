@@ -147,12 +147,12 @@ export default function Controls(props: Props) {
   );
 
   return (
-    <div className="absolute z-20 top-2 right-2 bg-gray-100/90 dark:bg-black/60 text-gray-900 dark:text-white p-3 rounded shadow flex flex-col gap-3 transition-colors duration-200" role="region" aria-label="Graph controls">
+    <div className="absolute z-20 top-2 right-2 bg-gray-100/90 dark:bg-black/60 text-gray-900 dark:text-white p-3 rounded-sm shadow-sm flex flex-col gap-3 transition-colors duration-200" role="region" aria-label="Graph controls">
       <div className="flex gap-2 items-center">
         <label className="text-xs" id="view-mode-label">View:</label>
         <div role="group" aria-labelledby="view-mode-label" className="flex gap-2">
           <button
-            className={`px-2 py-1 rounded border ${
+            className={`px-2 py-1 rounded-sm border ${
               graphMode === "3d"
                 ? "bg-blue-600 border-blue-400"
                 : "bg-gray-700 border-gray-500"
@@ -164,7 +164,7 @@ export default function Controls(props: Props) {
             3D
           </button>
           <button
-            className={`px-2 py-1 rounded border ${
+            className={`px-2 py-1 rounded-sm border ${
               graphMode === "2d"
                 ? "bg-blue-600 border-blue-400"
                 : "bg-gray-700 border-gray-500"
@@ -176,21 +176,21 @@ export default function Controls(props: Props) {
             2D
           </button>
           <button
-            className="px-2 py-1 rounded border bg-purple-600 border-purple-400 hover:bg-purple-700 text-white text-sm"
+            className="px-2 py-1 rounded-sm border bg-purple-600 border-purple-400 hover:bg-purple-700 text-white text-sm"
             onClick={() => onShowDashboard?.()}
             aria-label="Show dashboard"
           >
             Dashboard
           </button>
           <button
-            className="px-2 py-1 rounded border bg-green-600 border-green-400 hover:bg-green-700 text-white text-sm"
+            className="px-2 py-1 rounded-sm border bg-green-600 border-green-400 hover:bg-green-700 text-white text-sm"
             onClick={() => onShowCommunities?.()}
             aria-label="Show communities view"
           >
             Communities
           </button>
           <button
-            className="px-2 py-1 rounded border bg-red-600 border-red-400 hover:bg-red-700 text-white text-sm"
+            className="px-2 py-1 rounded-sm border bg-red-600 border-red-400 hover:bg-red-700 text-white text-sm"
             onClick={() => onShowAdmin?.()}
             aria-label="Admin"
           >
@@ -254,7 +254,7 @@ export default function Controls(props: Props) {
       <div className="text-xs text-gray-700 dark:text-white/70">Theme</div>
       <div role="group" aria-label="Theme selection" className="flex items-center gap-2">
         <button
-          className={`px-2 py-1 rounded border text-sm ${
+          className={`px-2 py-1 rounded-sm border text-sm ${
             themeMode === 'system'
               ? 'bg-blue-600 border-blue-400'
               : 'bg-gray-700 border-gray-500'
@@ -266,7 +266,7 @@ export default function Controls(props: Props) {
           System
         </button>
         <button
-          className={`px-2 py-1 rounded border text-sm ${
+          className={`px-2 py-1 rounded-sm border text-sm ${
             themeMode === 'light'
               ? 'bg-blue-600 border-blue-400'
               : 'bg-gray-700 border-gray-500'
@@ -278,7 +278,7 @@ export default function Controls(props: Props) {
           Light
         </button>
         <button
-          className={`px-2 py-1 rounded border text-sm ${
+          className={`px-2 py-1 rounded-sm border text-sm ${
             themeMode === 'dark'
               ? 'bg-blue-600 border-blue-400'
               : 'bg-gray-700 border-gray-500'
@@ -310,7 +310,7 @@ export default function Controls(props: Props) {
       <div className="text-xs text-gray-700 dark:text-white/70">Admin</div>
       <div className="flex items-center gap-3 text-sm">
         <button
-          className={`px-3 py-1 rounded border ${
+          className={`px-3 py-1 rounded-sm border ${
             srv?.crawler_enabled
               ? "bg-green-600 border-green-400"
               : "bg-gray-700 border-gray-500"
@@ -324,7 +324,7 @@ export default function Controls(props: Props) {
           {srv?.crawler_enabled ? "Crawler ON" : "Crawler OFF"}
         </button>
         <button
-          className={`px-3 py-1 rounded border ${
+          className={`px-3 py-1 rounded-sm border ${
             srv?.precalc_enabled
               ? "bg-green-600 border-green-400"
               : "bg-gray-700 border-gray-500"
@@ -349,11 +349,11 @@ export default function Controls(props: Props) {
             setSearch(e.target.value)
           }
           placeholder="Focus node by id/name"
-          className="bg-black/40 border border-white/20 rounded px-2 py-1 text-sm outline-none"
+          className="bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-sm outline-hidden"
           aria-label="Focus node by ID or name"
         />
         <button
-          className="border border-white/30 rounded px-2 py-1 hover:bg-white/10"
+          className="border border-white/30 rounded-sm px-2 py-1 hover:bg-white/10"
           onClick={() => onFocusNode(search || undefined)}
           aria-label="Focus on the specified node"
         >
@@ -416,7 +416,7 @@ export default function Controls(props: Props) {
         <label htmlFor="subreddit-size-select" className="text-sm whitespace-nowrap">Subreddit size</label>
         <select
           id="subreddit-size-select"
-          className="bg-black/40 border border-white/20 rounded px-2 py-1 text-sm outline-none"
+          className="bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-sm outline-hidden"
           value={subredditSize}
           onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
             onSubredditSizeChange(e.target.value as Props["subredditSize"])
@@ -562,7 +562,7 @@ export default function Controls(props: Props) {
             />
             <span className="inline-flex items-center gap-1">
               <span
-                className="w-3 h-3 inline-block rounded"
+                className="w-3 h-3 inline-block rounded-sm"
                 style={{ background: i.color }}
               />
               {i.key}
@@ -580,7 +580,7 @@ export default function Controls(props: Props) {
             min={0}
             value={minDegree ?? ""}
             placeholder="None"
-            className="bg-black/40 border border-white/20 rounded px-2 py-1 text-sm outline-none w-20"
+            className="bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-sm outline-hidden w-20"
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               const val = e.target.value;
               onMinDegreeChange(val === "" ? undefined : parseInt(val, 10) || 0);
@@ -596,7 +596,7 @@ export default function Controls(props: Props) {
             min={0}
             value={maxDegree ?? ""}
             placeholder="None"
-            className="bg-black/40 border border-white/20 rounded px-2 py-1 text-sm outline-none w-20"
+            className="bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-sm outline-hidden w-20"
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               const val = e.target.value;
               onMaxDegreeChange(val === "" ? undefined : parseInt(val, 10) || 0);

@@ -1,6 +1,6 @@
 # Use a lightweight base image
 # Build stage
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 # Vite substitutes VITE_* values while compiling. Runtime environment passed
 # to Nginx cannot change a shipped JavaScript bundle, so keep same-origin /api

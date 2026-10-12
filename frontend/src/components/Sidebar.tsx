@@ -229,7 +229,7 @@ export default function Sidebar(props: Props) {
           )}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-1 hover:bg-white/10 rounded transition-colors ml-auto"
+            className="p-1 hover:bg-white/10 rounded-sm transition-colors ml-auto"
             aria-label={isCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
             aria-expanded={!isCollapsed}
             aria-controls="sidebar-content"
@@ -260,35 +260,35 @@ export default function Sidebar(props: Props) {
           <div className="flex flex-col items-center gap-4 py-4" id="sidebar-content">
             <button
               onClick={() => setIsCollapsed(false)}
-              className="p-2 hover:bg-white/10 rounded transition-colors"
+              className="p-2 hover:bg-white/10 rounded-sm transition-colors"
               aria-label="Expand View section"
             >
               <span aria-hidden="true">👁️</span>
             </button>
             <button
               onClick={() => setIsCollapsed(false)}
-              className="p-2 hover:bg-white/10 rounded transition-colors"
+              className="p-2 hover:bg-white/10 rounded-sm transition-colors"
               aria-label="Expand Filters section"
             >
               <span aria-hidden="true">🔍</span>
             </button>
             <button
               onClick={() => setIsCollapsed(false)}
-              className="p-2 hover:bg-white/10 rounded transition-colors"
+              className="p-2 hover:bg-white/10 rounded-sm transition-colors"
               aria-label="Expand Physics section"
             >
               <span aria-hidden="true">⚡</span>
             </button>
             <button
               onClick={() => setIsCollapsed(false)}
-              className="p-2 hover:bg-white/10 rounded transition-colors"
+              className="p-2 hover:bg-white/10 rounded-sm transition-colors"
               aria-label="Expand Display section"
             >
               <span aria-hidden="true">🎨</span>
             </button>
             <button
               onClick={() => setIsCollapsed(false)}
-              className="p-2 hover:bg-white/10 rounded transition-colors"
+              className="p-2 hover:bg-white/10 rounded-sm transition-colors"
               aria-label="Expand Data section"
             >
               <span aria-hidden="true">📊</span>
@@ -307,7 +307,7 @@ export default function Sidebar(props: Props) {
             >
               <div className="flex flex-wrap gap-2" role="group" aria-label="View mode selection">
                 <button
-                  className={`px-3 py-1.5 rounded border text-xs font-medium ${
+                  className={`px-3 py-1.5 rounded-sm border text-xs font-medium ${
                     graphMode === "3d"
                       ? "bg-blue-600 border-blue-400"
                       : "bg-gray-700 border-gray-500"
@@ -319,7 +319,7 @@ export default function Sidebar(props: Props) {
                   3D
                 </button>
                 <button
-                  className={`px-3 py-1.5 rounded border text-xs font-medium ${
+                  className={`px-3 py-1.5 rounded-sm border text-xs font-medium ${
                     graphMode === "2d"
                       ? "bg-blue-600 border-blue-400"
                       : "bg-gray-700 border-gray-500"
@@ -331,20 +331,20 @@ export default function Sidebar(props: Props) {
                   2D
                 </button>
                 <button
-                  className="px-3 py-1.5 rounded border bg-purple-600 border-purple-400 hover:bg-purple-700 text-xs font-medium"
+                  className="px-3 py-1.5 rounded-sm border bg-purple-600 border-purple-400 hover:bg-purple-700 text-xs font-medium"
                   onClick={() => onShowDashboard?.()}
                   aria-label="Show dashboard"
                 >
                   Dashboard
                 </button>
                 <button
-                  className="px-3 py-1.5 rounded border bg-green-600 border-green-400 hover:bg-green-700 text-xs font-medium"
+                  className="px-3 py-1.5 rounded-sm border bg-green-600 border-green-400 hover:bg-green-700 text-xs font-medium"
                   onClick={() => onShowCommunities?.()}
                 >
                   Communities
                 </button>
                 <button
-                  className="px-3 py-1.5 rounded border bg-red-600 border-red-400 hover:bg-red-700 text-xs font-medium"
+                  className="px-3 py-1.5 rounded-sm border bg-red-600 border-red-400 hover:bg-red-700 text-xs font-medium"
                   onClick={() => onShowAdmin?.()}
                 >
                   Admin
@@ -357,10 +357,10 @@ export default function Sidebar(props: Props) {
                     setSearch(e.target.value)
                   }
                   placeholder="Focus node by id/name"
-                  className="flex-1 bg-black/40 border border-white/20 rounded px-2 py-1.5 text-xs outline-none"
+                  className="flex-1 bg-black/40 border border-white/20 rounded-sm px-2 py-1.5 text-xs outline-hidden"
                 />
                 <button
-                  className="border border-white/30 rounded px-2 py-1.5 hover:bg-white/10 text-xs"
+                  className="border border-white/30 rounded-sm px-2 py-1.5 hover:bg-white/10 text-xs"
                   onClick={() => onFocusNode(search || undefined)}
                 >
                   Focus
@@ -384,7 +384,7 @@ export default function Sidebar(props: Props) {
                     />
                     <span className="inline-flex items-center gap-1 text-xs">
                       <span
-                        className="w-3 h-3 inline-block rounded"
+                        className="w-3 h-3 inline-block rounded-sm"
                         style={{ background: i.color }}
                       />
                       {i.key}
@@ -400,7 +400,7 @@ export default function Sidebar(props: Props) {
                     min={0}
                     value={minDegree ?? ""}
                     placeholder="None"
-                    className="flex-1 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs outline-none"
+                    className="flex-1 bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-xs outline-hidden"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       const val = e.target.value;
                       onMinDegreeChange(
@@ -418,7 +418,7 @@ export default function Sidebar(props: Props) {
                     min={0}
                     value={maxDegree ?? ""}
                     placeholder="None"
-                    className="flex-1 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs outline-none"
+                    className="flex-1 bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-xs outline-hidden"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       const val = e.target.value;
                       onMaxDegreeChange(
@@ -729,7 +729,7 @@ export default function Sidebar(props: Props) {
                 </label>
                 <select
                   id="subreddit-size-select"
-                  className="flex-1 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs outline-none"
+                  className="flex-1 bg-black/40 border border-white/20 rounded-sm px-2 py-1 text-xs outline-hidden"
                   value={subredditSize}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                     onSubredditSizeChange(e.target.value as SubredditSize)

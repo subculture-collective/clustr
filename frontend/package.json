@@ -36,6 +36,7 @@
         "@eslint/js": "^9.25.0",
         "@playwright/test": "^1.56.1",
         "@size-limit/file": "^12.0.0",
+        "@tailwindcss/postcss": "^4.3.3",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/react": "^16.3.0",
         "@testing-library/user-event": "^14.6.1",
@@ -44,9 +45,8 @@
         "@types/react-dom": "^19.1.2",
         "@types/three": "^0.177.0",
         "@vitejs/plugin-react-swc": "^3.9.0",
-        "@vitest/coverage-v8": "^4.0.18",
-        "@vitest/ui": "^4.0.5",
-        "autoprefixer": "^10.4.21",
+        "@vitest/coverage-v8": "^4.1.11",
+        "@vitest/ui": "^4.1.11",
         "axe-core": "4.10.2",
         "eslint": "^9.25.0",
         "eslint-plugin-react-hooks": "^5.2.0",
@@ -58,10 +58,10 @@
         "postcss": "^8.5.4",
         "rollup-plugin-visualizer": "^6.0.5",
         "size-limit": "^12.0.0",
-        "tailwindcss": "^3.4.17",
+        "tailwindcss": "^4.3.3",
         "typescript": "~5.8.3",
         "typescript-eslint": "^8.30.1",
         "vite": "^6.4.0",
-        "vitest": "^4.0.5"
+        "vitest": "^4.1.11"
     }
 }

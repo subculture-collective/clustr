@@ -15,7 +15,7 @@ export default function LoadingProgress({
 }: LoadingProgressProps) {
   return (
     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
-      <div className="bg-gray-900/90 backdrop-blur-sm text-white px-6 py-3 rounded-lg shadow-lg border border-gray-700">
+      <div className="bg-gray-900/90 backdrop-blur-xs text-white px-6 py-3 rounded-lg shadow-lg border border-gray-700">
         <div className="flex items-center gap-4">
           {/* Progress bar */}
           <div className="flex-1 min-w-[200px]">

@@ -45,8 +45,8 @@ export default function FieldGuide({ open, onClose }: FieldGuideProps) {
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div ref={dialogRef} className="fixed inset-0 z-[90] overflow-y-auto bg-[#030506]/88 p-3 backdrop-blur-xl md:p-8" role="dialog" aria-modal="true" aria-labelledby="field-guide-title">
-      <div className="instrument-panel mx-auto min-h-full max-w-6xl rounded-[1.5rem] p-6 md:min-h-0 md:p-10">
+    <div ref={dialogRef} className="fixed inset-0 z-90 overflow-y-auto bg-[#030506]/88 p-3 backdrop-blur-xl md:p-8" role="dialog" aria-modal="true" aria-labelledby="field-guide-title">
+      <div className="instrument-panel mx-auto min-h-full max-w-6xl rounded-3xl p-6 md:min-h-0 md:p-10">
         <header className="flex items-start justify-between gap-6 border-b border-white/10 pb-8">
           <div>
             <p className="instrument-label mb-4">Field guide / Clustr universe</p>
@@ -68,7 +68,7 @@ export default function FieldGuide({ open, onClose }: FieldGuideProps) {
             <p className="instrument-label mb-3">How it is done</p>
             <h3 id="pipeline-title" className="text-2xl font-semibold tracking-tight">From crawl to constellation</h3>
             <ol className="mt-6 space-y-3">
-              {pipeline.map(([number, title, description]) => <li key={number} className="grid grid-cols-[2.5rem_1fr] gap-4 rounded-xl border border-white/10 bg-white/[.025] p-4"><span className="font-mono text-xs text-[#b6ff62]">{number}</span><div><h4 className="font-semibold text-white">{title}</h4><p className="mt-1 text-sm leading-6 text-[#9aaba8]">{description}</p></div></li>)}
+              {pipeline.map(([number, title, description]) => <li key={number} className="grid grid-cols-[2.5rem_1fr] gap-4 rounded-xl border border-white/10 bg-white/2.5 p-4"><span className="font-mono text-xs text-[#b6ff62]">{number}</span><div><h4 className="font-semibold text-white">{title}</h4><p className="mt-1 text-sm leading-6 text-[#9aaba8]">{description}</p></div></li>)}
             </ol>
           </section>
         </div>
