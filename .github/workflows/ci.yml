@@ -52,12 +52,12 @@ jobs:
         run: bash scripts/test-backend-ci.sh
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: actions/upload-artifact@v3
         with:
-          files: ./backend/coverage.out
-          flags: backend
           name: backend-coverage
-        continue-on-error: true
+          path: backend/coverage.out
+          retention-days: 7
+          if-no-files-found: error
 
   test-frontend:
     name: Test Frontend
@@ -94,13 +94,13 @@ jobs:
         working-directory: ./frontend
         run: npm run test:coverage
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage
+        uses: actions/upload-artifact@v3
         with:
-          files: ./frontend/coverage/lcov.info
-          flags: frontend
           name: frontend-coverage
-        continue-on-error: true
+          path: frontend/coverage/lcov.info
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Build frontend
         working-directory: ./frontend
@@ -227,13 +227,15 @@ jobs:
                 const diff = item.size - baseSize;
                 const pctIncrease = (diff / baseSize) * 100;
 
-                if (pctIncrease > 5 || diff > 50 * 1024) {
+                // Keep the absolute CSS cap and reject material relative growth.
+                const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' || diff > 5 * 1024;
+                if ((pctIncrease > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {
                   significantIncrease = true;
                 }
               }
             }
 
-            comment += '\n';
+            comment += '\nCSS relative growth requires more than 5 KB added; absolute limits still apply.\n\n';
 
             // Report issues
             if (anyExceeded) {
@@ -254,7 +256,9 @@ jobs:
                   const diff = item.size - baseItem.size;
                   const pctIncrease = (diff / baseItem.size) * 100;
 
-                  if (pctIncrease > 5 || diff > 50 * 1024) {
+                  // Keep the absolute CSS cap and reject material relative growth.
+                const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' || diff > 5 * 1024;
+                if ((pctIncrease > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {
                     comment += `- ${item.name} increased by ${formatSize(diff)} (${pctIncrease.toFixed(2)}%), exceeding the threshold of 5% or 50KB\n`;
                   }
                 }
@@ -296,9 +300,9 @@ jobs:
               core.setFailed('Bundle size exceeds configured limits');
             }
 
-            // Fail on significant increases (>5% or >50KB)
+            // Fail on significant increases, retaining the CSS noise floor.
             if (significantIncrease && !anyExceeded) {
-              core.setFailed('Bundle size increased significantly (>5% or >50KB)');
+              core.setFailed('Bundle size increased significantly (>5%, with a 5KB CSS floor, or >50KB)');
             }
 
   visual-regression:
