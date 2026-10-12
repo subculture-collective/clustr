@@ -9,8 +9,18 @@ permissions:
   contents: write
 
 jobs:
+  qualify-source:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: github.server_url == 'https://github.com'
+    uses: ./.github/workflows/ci.yml
+
   create-release:
+    needs: qualify-source
+    if: github.server_url == 'https://github.com'
     name: Create Release
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:

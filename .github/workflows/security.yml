@@ -107,6 +107,7 @@ jobs:
 
   security-summary:
     name: Security Summary
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     needs: [dependency-scan-backend, dependency-scan-frontend, docker-security]
     if: always()
