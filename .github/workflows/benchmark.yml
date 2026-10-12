@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch: # Allow manual trigger
 
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     name: Run Performance Benchmarks
@@ -124,6 +127,7 @@ jobs:
   # Store baseline on main branch
   store-baseline:
     name: Store Baseline
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: benchmark
