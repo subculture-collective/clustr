@@ -16,7 +16,9 @@ RUN npm run build
 
 # Serve stage
 FROM nginx:alpine
-RUN apk upgrade --no-cache
+# Require fixes even when a prior upgrade layer exists in the build cache.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0'
 COPY --from=build /app/dist/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80
