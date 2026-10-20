@@ -141,10 +141,10 @@ test.describe('Performance Benchmarks', () => {
       // Navigate to the app
       await page.goto('/?adaptiveLOD=0&f_subreddit=1&f_user=1&f_post=1&f_comment=1');
       
-      // Wait for the page to load
-      await page.waitForLoadState('networkidle');
-      expect(manifestRequests).toBeGreaterThan(0);
-      expect(graphRequests).toBeGreaterThan(0);
+      // Network idle can precede React mounting the graph on a busy runner.
+      // Wait for actual fixture requests without changing the render budget.
+      await expect.poll(() => manifestRequests, { timeout: 30000 }).toBeGreaterThan(0);
+      await expect.poll(() => graphRequests, { timeout: 30000 }).toBeGreaterThan(0);
       const graph = page.locator('[data-visible-node-count]');
       await expect(graph).toHaveAttribute('data-visible-node-count', String(linkedNodeCount), {
         timeout: 30000,
