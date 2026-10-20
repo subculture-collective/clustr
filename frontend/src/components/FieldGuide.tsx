@@ -80,7 +80,7 @@ export default function FieldGuide({ open, onClose }: FieldGuideProps) {
             </div>
           </div>
         </section>
-        <footer className="flex flex-col gap-4 border-t border-white/10 pt-6 text-sm text-[#9aaba8] sm:flex-row sm:items-center sm:justify-between"><p>Drag to orbit · scroll to travel · click a landmark to approach · press / to search</p><button onClick={onClose} className="instrument-button rounded-full border-white/15 px-5 text-white">Enter the universe <span aria-hidden="true">→</span></button></footer>
+        <p className="text-sm text-[#9aaba8]">Clustr is built by SUBCULT. <a href="https://subcult.tv/support" className="underline">Support the studio</a>; contributions do not go to communities shown in the map.</p><footer className="flex flex-col gap-4 border-t border-white/10 pt-6 text-sm text-[#9aaba8] sm:flex-row sm:items-center sm:justify-between"><p>Drag to orbit · scroll to travel · click a landmark to approach · press / to search</p><button onClick={onClose} className="instrument-button rounded-full border-white/15 px-5 text-white">Enter the universe <span aria-hidden="true">→</span></button></footer>
       </div>
     </div>
   );
