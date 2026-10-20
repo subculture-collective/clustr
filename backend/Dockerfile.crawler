@@ -31,6 +31,9 @@ RUN apt-get update && \
     echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
     apt-get install -y postgresql-client-17 && \
+    # Reject cached or stale repository packages affected by CVE-2026-32316.
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' jq)" ge 1.6-2.1+deb12u3 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libjq1)" ge 1.6-2.1+deb12u3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
