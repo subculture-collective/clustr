@@ -30,10 +30,13 @@ RUN apt-get update && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
-    apt-get install -y postgresql-client-17 && \
+    apt-get install -y postgresql-client-17 libbrotli1 libssl3 && \
     # Reject cached or stale repository packages affected by CVE-2026-32316.
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' jq)" ge 1.6-2.1+deb12u3 && \
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libjq1)" ge 1.6-2.1+deb12u3 && \
+    # Require the security fixes reported by the image vulnerability gate.
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.0.9-2+deb12u1 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libssl3)" ge 3.0.22-1~deb12u2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
