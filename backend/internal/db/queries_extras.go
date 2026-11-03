@@ -84,6 +84,9 @@ func (q *Queries) BatchInsertGraphLinks(ctx context.Context, links []BulkInsertG
 		sb.WriteString("SELECT v.source, v.target FROM vals v ")
 		sb.WriteString("JOIN graph_nodes s ON s.id = v.source ")
 		sb.WriteString("JOIN graph_nodes t ON t.id = v.target ")
+		// Filter existing pairs before the insert: ON CONFLICT alone still
+		// draws a graph_links id (nextval) for every duplicate it discards.
+		sb.WriteString("WHERE NOT EXISTS (SELECT 1 FROM graph_links e WHERE e.source = v.source AND e.target = v.target) ")
 		sb.WriteString("ON CONFLICT (source, target) DO NOTHING")
 		if _, err := q.db.ExecContext(ctx, sb.String(), args...); err != nil {
 			return err

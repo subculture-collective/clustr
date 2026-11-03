@@ -842,37 +842,11 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 	// one set-based statement instead of copying millions of rows through Go.
 	if q, ok := s.store.(*db.Queries); ok {
 		workspaceLinkCap := positiveEnv("GRAPH_WORKSPACE_LINK_CAP", 200000)
-		result, err := q.DB().ExecContext(ctx, `
-INSERT INTO graph_links(source,target)
-	SELECT source,target FROM (
-	SELECT source,target,weight FROM (
-	  SELECT 'subreddit_'||r.source_subreddit_id source,
-	         'subreddit_'||r.target_subreddit_id target,r.overlap_count weight
-	  FROM subreddit_relationships r
-	  JOIN graph_nodes s ON s.id='subreddit_'||r.source_subreddit_id
-	  JOIN graph_nodes t ON t.id='subreddit_'||r.target_subreddit_id
-	  WHERE r.source_subreddit_id<r.target_subreddit_id
-	  ORDER BY r.overlap_count DESC,r.source_subreddit_id,r.target_subreddit_id
-	  LIMIT $1
-	) overlap
-	UNION ALL
-	SELECT source,target,weight FROM (
-	  SELECT 'user_'||a.user_id source,'subreddit_'||a.subreddit_id target,a.activity_count weight
-	  FROM user_subreddit_activity a
-	  JOIN graph_nodes u ON u.id='user_'||a.user_id
-	  JOIN graph_nodes s ON s.id='subreddit_'||a.subreddit_id
-	  ORDER BY a.activity_count DESC,a.user_id,a.subreddit_id
-	  LIMIT $1
-	) activity
-	) candidates
-	ORDER BY weight DESC,source,target
-	LIMIT $1
-ON CONFLICT(source,target) DO NOTHING`, workspaceLinkCap)
+		count, err := materializeWorkspaceLinks(ctx, q.DB(), workspaceLinkCap)
 		if err != nil {
 			precalcErr = fmt.Errorf("set-based graph link materialization: %w", err)
 			return precalcErr
 		}
-		count, _ := result.RowsAffected()
 		log.Printf("✅ Materialized %d base graph links with set-based SQL", count)
 	} else {
 		// Alternate-store fallback retained for unit tests.
@@ -1300,4 +1274,60 @@ func randFloat() float64 {
 	x ^= x >> 7
 	x ^= x << 17
 	return float64(x%1_000_000) / 1_000_000.0
+}
+
+// materializeWorkspaceLinksSQL inserts the strongest overlap and activity
+// candidates, capped at $1, into graph_links. Incremental runs preserve
+// graph_links, so most capped candidates already exist. PostgreSQL evaluates
+// the id default (nextval) before ON CONFLICT discards a duplicate, so the
+// existing-link filter must run before the insert: otherwise every run spends
+// up to $1 identifiers on rows it never keeps. The filter sits outside the
+// LIMIT so existing links still count toward the cap and the workspace does
+// not grow by $1 links per run. ON CONFLICT remains as a guard against a
+// concurrent writer.
+const materializeWorkspaceLinksSQL = `
+INSERT INTO graph_links(source,target)
+SELECT top.source,top.target FROM (
+	SELECT source,target FROM (
+	SELECT source,target,weight FROM (
+	  SELECT 'subreddit_'||r.source_subreddit_id source,
+	         'subreddit_'||r.target_subreddit_id target,r.overlap_count weight
+	  FROM subreddit_relationships r
+	  JOIN graph_nodes s ON s.id='subreddit_'||r.source_subreddit_id
+	  JOIN graph_nodes t ON t.id='subreddit_'||r.target_subreddit_id
+	  WHERE r.source_subreddit_id<r.target_subreddit_id
+	  ORDER BY r.overlap_count DESC,r.source_subreddit_id,r.target_subreddit_id
+	  LIMIT $1
+	) overlap
+	UNION ALL
+	SELECT source,target,weight FROM (
+	  SELECT 'user_'||a.user_id source,'subreddit_'||a.subreddit_id target,a.activity_count weight
+	  FROM user_subreddit_activity a
+	  JOIN graph_nodes u ON u.id='user_'||a.user_id
+	  JOIN graph_nodes s ON s.id='subreddit_'||a.subreddit_id
+	  ORDER BY a.activity_count DESC,a.user_id,a.subreddit_id
+	  LIMIT $1
+	) activity
+	) candidates
+	ORDER BY weight DESC,source,target
+	LIMIT $1
+) top
+WHERE NOT EXISTS (
+	SELECT 1 FROM graph_links existing
+	WHERE existing.source=top.source AND existing.target=top.target
+)
+ON CONFLICT(source,target) DO NOTHING`
+
+type execContexter interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// materializeWorkspaceLinks runs materializeWorkspaceLinksSQL and returns the
+// number of links it inserted.
+func materializeWorkspaceLinks(ctx context.Context, conn execContexter, linkCap int) (int64, error) {
+	result, err := conn.ExecContext(ctx, materializeWorkspaceLinksSQL, linkCap)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
