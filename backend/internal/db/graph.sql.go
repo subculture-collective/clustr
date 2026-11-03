@@ -114,7 +114,7 @@ func (q *Queries) ClearGraphTables(ctx context.Context) error {
 }
 
 const clearSubredditRelationships = `-- name: ClearSubredditRelationships :exec
-TRUNCATE TABLE subreddit_relationships
+TRUNCATE TABLE subreddit_relationships RESTART IDENTITY
 `
 
 func (q *Queries) ClearSubredditRelationships(ctx context.Context) error {
@@ -123,7 +123,7 @@ func (q *Queries) ClearSubredditRelationships(ctx context.Context) error {
 }
 
 const clearUserSubredditActivity = `-- name: ClearUserSubredditActivity :exec
-TRUNCATE TABLE user_subreddit_activity
+TRUNCATE TABLE user_subreddit_activity RESTART IDENTITY
 `
 
 func (q *Queries) ClearUserSubredditActivity(ctx context.Context) error {
