@@ -178,7 +178,7 @@ INSERT INTO graph_links (
 ) RETURNING *;
 
 -- name: ClearGraphTables :exec
-TRUNCATE TABLE graph_nodes, graph_links CASCADE;
+TRUNCATE TABLE graph_nodes, graph_links RESTART IDENTITY CASCADE;
 
 INSERT INTO graph_nodes (id, name, val, type)
 VALUES ($1, $2, $3, $4);
@@ -188,6 +188,7 @@ INSERT INTO graph_links (source, target)
 SELECT $1, $2
 WHERE EXISTS (SELECT 1 FROM graph_nodes WHERE id = $1)
     AND EXISTS (SELECT 1 FROM graph_nodes WHERE id = $2)
+    AND NOT EXISTS (SELECT 1 FROM graph_links WHERE source = $1 AND target = $2)
 ON CONFLICT (source, target) DO NOTHING;
 
 -- name: GetAllSubreddits :many
