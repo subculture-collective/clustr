@@ -235,7 +235,7 @@ DO UPDATE SET
 RETURNING *;
 
 -- name: ClearSubredditRelationships :exec
-TRUNCATE TABLE subreddit_relationships;
+TRUNCATE TABLE subreddit_relationships RESTART IDENTITY;
 
 -- name: GetUserSubreddits :many
 SELECT DISTINCT s.id, s.name
@@ -264,7 +264,7 @@ INSERT INTO user_subreddit_activity (
 ) RETURNING *;
 
 -- name: ClearUserSubredditActivity :exec
-TRUNCATE TABLE user_subreddit_activity;
+TRUNCATE TABLE user_subreddit_activity RESTART IDENTITY;
 
 -- name: GetAllSubredditRelationships :many
 SELECT source_subreddit_id, target_subreddit_id, overlap_count
