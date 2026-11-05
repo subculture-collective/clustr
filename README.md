@@ -1,5 +1,7 @@
 # Clustr
 
+![Clustr identity](docs/brand/clustr/readme-lockup.png)
+
 [CI on Gitea](https://git.subcult.tv/subculture-collective/clustr/actions)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
 
@@ -243,3 +245,7 @@ See `frontend/README.md` for local dev and env hints.
 ## License
 
 Licensed under `GPL-3.0-or-later`. See [LICENSE](LICENSE).
+
+## Brand assets
+
+The product identity and selected public exports are recorded in [the brand handoff](docs/brand/clustr/GUIDE.md) and [source hashes](docs/brand/clustr/export.json). Regenerate from SUBCULT Studio with `python3 studio/scripts/export_remaining_brand.py clustr /path/to/this/repository`; use `--check` to verify the export without writing.
