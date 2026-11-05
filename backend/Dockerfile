@@ -26,11 +26,14 @@ WORKDIR /app
 
 # Install PostgreSQL client and jq for JSON validation
 RUN apt-get update && \
-    apt-get install -y curl gnupg2 jq && \
+    apt-get install -y curl gnupg2 jq apt libapt-pkg6.0 && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
     apt-get install -y postgresql-client-17 libbrotli1 libssl3 && \
+    # Require the APT fixes reported by CVE-2026-109518.
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apt)" ge 2.6.2 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libapt-pkg6.0)" ge 2.6.2 && \
     # Reject cached or stale repository packages affected by CVE-2026-32316.
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' jq)" ge 1.6-2.1+deb12u3 && \
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libjq1)" ge 1.6-2.1+deb12u3 && \
