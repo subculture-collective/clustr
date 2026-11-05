@@ -1,0 +1,13 @@
+# Exact historical findings only; new commits and other credentials remain scanned.
+# Eight deliberate mask/auth test examples; two references to a retired DB password.
+# See docs/CI-CD.md: Historical secret findings.
+0c13b40e006b61d2b2f7d05e87008b1a14e97380:docs/SECURITY_AUDIT_SUMMARY.md:curl-auth-header:75
+0c13b40e006b61d2b2f7d05e87008b1a14e97380:scripts/security-test.sh:curl-auth-header:100
+0c13b40e006b61d2b2f7d05e87008b1a14e97380:scripts/security-test.sh:curl-auth-header:133
+0c13b40e006b61d2b2f7d05e87008b1a14e97380:docs/SECURITY_AUDIT.md:curl-auth-header:197
+59f55efde3682c6051894eebdca02241fffee23e:backend/internal/errorreporting/sentry_test.go:stripe-access-token:33
+59f55efde3682c6051894eebdca02241fffee23e:backend/internal/errorreporting/sentry_test.go:stripe-access-token:35
+26a8d9671eb7f8e51f844cc3a48bd6f8c3255999:backend/internal/secrets/mask_test.go:generic-api-key:28
+26a8d9671eb7f8e51f844cc3a48bd6f8c3255999:docs/oauth-token-management.md:curl-auth-header:80
+923cdb16f8ed247ca8f0880a3308bf966f933ccb:backend/docker-compose.yml:generic-api-key:30
+923cdb16f8ed247ca8f0880a3308bf966f933ccb:backend/Makefile:generic-api-key:9
