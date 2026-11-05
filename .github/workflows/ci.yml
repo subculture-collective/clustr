@@ -2,6 +2,7 @@ name: CI
 
 on:
   workflow_call:
+  workflow_dispatch:
   push:
     branches: [ main, uplink/deploy-branch ]
   pull_request:
@@ -442,3 +443,107 @@ jobs:
           else
             gitleaks git --redact
           fi
+
+  frontend-deploy:
+    name: Deploy verified frontend to Almaz
+    needs: [test-backend, test-frontend, visual-regression, build-backend-images, build-frontend-image, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DEPLOY_REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Reuse an already accepted frontend artifact
+        id: artifact
+        if: github.server_url == 'https://git.subcult.tv' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          umask 077
+          deploy_dir=$(mktemp -d)
+          trap 'rm -rf "$deploy_dir"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
+          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
+            -o ConnectTimeout=15 onnwee@10.0.0.200)
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$deploy_dir/artifact.json"
+          python3 - "$deploy_dir/artifact.json" "$GITHUB_OUTPUT" <<'PYCODE'
+          import json, re, sys
+          from pathlib import Path
+          info = json.loads(Path(sys.argv[1]).read_text())
+          available = info.get("available") is True
+          if available:
+              assert re.fullmatch(r"[0-9a-f]{64}", info.get("html_sha256", ""))
+          with Path(sys.argv[2]).open("a") as output:
+              output.write("available=" + str(available).lower() + "\n")
+          PYCODE
+      - name: Build deployable images from the verified revision
+        if: steps.artifact.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          docker build --build-arg VITE_API_URL=/api --build-arg VITE_CATALOG_ENABLED=false -f frontend/Dockerfile --label "org.opencontainers.image.revision=$DEPLOY_REVISION" \
+            --label "org.opencontainers.image.source=https://git.subcult.tv/subculture-collective/clustr" -t "$image" frontend
+          docker run --rm --network none --add-host reddit-api:127.0.0.1 --add-host api:127.0.0.1 --entrypoint nginx "$image" -t
+      - name: Scan the actual deployment image
+        if: steps.artifact.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table "fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+      - name: Deploy the built image and verify public HTML
+        if: >-
+          github.server_url == 'https://git.subcult.tv' &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          REUSE_ARTIFACT: ${{ steps.artifact.outputs.available }}
+          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          umask 077
+          deploy_dir=$(mktemp -d)
+          trap 'rm -rf "$deploy_dir"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
+          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
+            -o ConnectTimeout=15 onnwee@10.0.0.200)
+          ssh "${ssh_args[@]}" status
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          # The forced receiver accepts a full hexadecimal revision; expand it here.
+          if [[ "$REUSE_ARTIFACT" != true ]]; then
+            # shellcheck disable=SC2029
+            docker save "$image" | ssh "${ssh_args[@]}" "receive $DEPLOY_REVISION clustr-frontend"
+          fi
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "deploy $DEPLOY_REVISION"
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$deploy_dir/artifact.json"
+          expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_sha256"])' "$deploy_dir/artifact.json")
+          curl --fail --silent --show-error --retry 4 --retry-all-errors \
+            --max-time 30 https://clustr.subcult.tv/ > "$deploy_dir/live.html"
+          actual=$(sha256sum "$deploy_dir/live.html" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+          printf 'Live HTML matches the image built from %s\n' "$DEPLOY_REVISION"
