@@ -20,11 +20,6 @@ export default defineConfig(({ mode }) => {
   server: {
     proxy: {
       "/api": proxyTarget,
-      "/subreddits": proxyTarget,
-      "/users": proxyTarget,
-      "/posts": proxyTarget,
-      "/comments": proxyTarget,
-      "/jobs": proxyTarget,
     },
   },
   build: {

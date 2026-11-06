@@ -98,25 +98,43 @@ func NewRouter(q *db.Queries) *mux.Router {
 	r.HandleFunc("/oauth/reddit/login", auth.Login).Methods("GET")
 	r.HandleFunc("/oauth/reddit/callback", auth.Callback).Methods("GET")
 
-	// REST-style resources (no /api prefix) for internal/admin queries
-	// Subreddits list: GET /subreddits?limit=&offset=
-	r.HandleFunc("/subreddits", handlers.GetSubreddits(q)).Methods("GET")
+	// Admin auth middleware using a static bearer token from env
+	adminOnly := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if cfg.AdminAPIToken == "" {
+				apierr.WriteErrorWithContext(w, r, apierr.SystemUnavailable("Admin token not configured"))
+				return
+			}
+			auth := r.Header.Get("Authorization")
+			const prefix = "Bearer "
+			if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix || auth[len(prefix):] != cfg.AdminAPIToken {
+				apierr.WriteErrorWithContext(w, r, apierr.AuthInvalid(""))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 
-	// Explicit API endpoints with /api prefix intended for frontend use
+	// Operator tools. These return source rows without the public suppression
+	// filter and let a caller enqueue crawls, so they are gated like the rest
+	// of the admin API. The explorer never calls them.
+	// Subreddits list: GET /subreddits?limit=&offset=
+	r.Handle("/subreddits", adminOnly(handlers.GetSubreddits(q))).Methods("GET")
+
 	// Enqueue a subreddit crawl: POST /api/crawl {"subreddit":"name"}
-	r.HandleFunc("/api/crawl", handlers.PostCrawl(q)).Methods("POST")
+	r.Handle("/api/crawl", adminOnly(handlers.PostCrawl(q))).Methods("POST")
 
 	// Users list: GET /users?limit=&offset=
-	r.HandleFunc("/users", handlers.GetUsers(q)).Methods("GET")
+	r.Handle("/users", adminOnly(handlers.GetUsers(q))).Methods("GET")
 
 	// Posts by subreddit: GET /posts?subreddit_id=&limit=&offset=
-	r.HandleFunc("/posts", handlers.GetPosts(q)).Methods("GET")
+	r.Handle("/posts", adminOnly(handlers.GetPosts(q))).Methods("GET")
 
 	// Comments by post: GET /comments?post_id=
-	r.HandleFunc("/comments", handlers.GetComments(q)).Methods("GET")
+	r.Handle("/comments", adminOnly(handlers.GetComments(q))).Methods("GET")
 
 	// Crawl jobs list: GET /jobs?limit=&offset=
-	r.HandleFunc("/jobs", handlers.GetCrawlJobs(q)).Methods("GET")
+	r.Handle("/jobs", adminOnly(handlers.GetCrawlJobs(q))).Methods("GET")
 
 	// Graph data for the frontend: GET /api/graph
 	graphHandler := handlers.NewHandler(q, graphCache)
@@ -194,27 +212,9 @@ func NewRouter(q *db.Queries) *mux.Router {
 
 	// Admin: toggle background services (gated)
 	admin := handlers.NewAdminHandler(q)
-	// We'll define adminOnly below, so temporarily register after it's declared.
 	// precalc is handled in its own service; no run-now route
-	// Crawl status
-	r.HandleFunc("/api/crawl/status", handlers.GetCrawlStatus(q)).Methods("GET")
-
-	// Admin auth middleware using a static bearer token from env
-	adminOnly := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if cfg.AdminAPIToken == "" {
-				apierr.WriteErrorWithContext(w, r, apierr.SystemUnavailable("Admin token not configured"))
-				return
-			}
-			auth := r.Header.Get("Authorization")
-			const prefix = "Bearer "
-			if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix || auth[len(prefix):] != cfg.AdminAPIToken {
-				apierr.WriteErrorWithContext(w, r, apierr.AuthInvalid(""))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
+	// Crawl queue: every queued legacy job, so operator-only.
+	r.Handle("/api/crawl/status", adminOnly(handlers.GetCrawlStatus(q))).Methods("GET")
 
 	// Backups (read-only): list and download files from mounted volume, gated by adminOnly
 	r.Handle("/api/admin/backups", adminOnly(http.HandlerFunc(handlers.ListBackups))).Methods("GET")

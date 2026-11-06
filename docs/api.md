@@ -127,6 +127,15 @@ Performance notes:
     - Results are cached per community and limits
     - Target response time: <200ms
 
+### Operator endpoints
+
+`POST /api/crawl`, `GET /api/crawl/status`, `GET /subreddits`, `GET /users`,
+`GET /posts`, `GET /comments` and `GET /jobs` return source rows without the
+public suppression filter or change the crawl queue. They require
+`Authorization: Bearer <ADMIN_API_TOKEN>`, like the admin endpoints below, and
+answer `401` without it. The public frontend proxies only `/api/`, so the
+five table listings are reachable only inside the deployment network.
+
 ### POST /api/crawl
 
 Enqueue a subreddit crawl job.
