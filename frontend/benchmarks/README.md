@@ -109,6 +109,8 @@ git add benchmarks/results/baseline.json
 git commit -m "chore: update performance baseline"
 ```
 
+The committed `baseline.json` is the one CI compares against: pull request runs cannot read the `benchmark-baseline` artifact that main pushes upload. CI runs on two Gitea runners of different speeds (Kvant and Kuznya), so a copy of one run's results makes the other runner fail. The `gitea-2cpu-v2` baseline was built from the per-run tables that CI posted on pull requests between November 3 and 6, 2026: render time is the slower runner's 75th percentile, FPS and parse time its median, and memory the median across both runners. Check a new baseline by passing earlier runs to `npx tsx benchmarks/compare.ts <baseline> <run>`.
+
 ## CI Integration
 
 Benchmarks run automatically in GitHub Actions on:
