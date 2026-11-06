@@ -277,7 +277,7 @@ interface Props {
   subredditSize?: SubSizeMode;
   focusNodeId?: string;
   selectedId?: string;
-  onNodeSelect?: (id?: string) => void;
+  onNodeSelect?: (id?: string, name?: string) => void;
   onInspectNode?: (id: string) => void;
   showLabels?: boolean; // when true, render always-on label sprites for key nodes
   communityResult?: {

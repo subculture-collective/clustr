@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHand
 import { useSpatialWorldClient } from '../contexts/spatialWorld';
 
 interface SearchBarProps {
-  onSelectNode: (nodeId: string) => void;
+  onSelectNode: (nodeId: string, name?: string) => void;
   className?: string;
 }
 
@@ -103,7 +103,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
         abortControllerRef.current = null;
       }
 
-      onSelectNode(result.id);
+      onSelectNode(result.id, result.name);
       setQuery('');
       setIsOpen(false);
       setResults([]);
