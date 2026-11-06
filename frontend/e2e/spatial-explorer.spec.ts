@@ -157,6 +157,44 @@ test('uses one published world across Map, Data, Places, and keyboard inspection
   expect(legacyGraphRequests).toEqual([]);
 });
 
+test('keeps the universe populated while travelling into a region and back out', async ({ page }) => {
+  await mockSpatialWorld(page);
+  // The client asks for region scenes with max_links=0, so they carry no links.
+  await page.route('**/api/graph/region**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      revision_id: 'rev-42',
+      spatial_catalog_id: 'catalog-8',
+      nodes: [
+        { id: 'subreddit_one', name: 'One', type: 'subreddit', val: 40, x: -20, y: 10, z: 30 },
+        { id: 'subreddit_two', name: 'Two', type: 'subreddit', val: 30, x: 30, y: -15, z: 50 },
+        { id: 'user_three', name: 'Three', type: 'user', val: 5, x: 5, y: 40, z: 20 },
+      ],
+      links: [],
+    }),
+  }));
+  await page.goto('/');
+
+  const universe = page.getByRole('application', { name: /interactive community universe/i });
+  await expect(universe).toHaveAttribute('data-visible-node-count', '4');
+  const bounds = await universe.boundingBox();
+  if (!bounds) throw new Error('universe has no bounding box');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+
+  // The camera applies a wheel tick on the next frame, so the number of ticks
+  // needed to cross the region threshold depends on frame timing. Keep
+  // scrolling until the scene changes instead of assuming a count.
+  await expect(async () => {
+    await page.mouse.wheel(0, -240);
+    await expect(universe).toHaveAttribute('data-visible-node-count', '3', { timeout: 250 });
+  }).toPass({ timeout: 15_000 });
+
+  await expect(async () => {
+    await page.mouse.wheel(0, 240);
+    await expect(universe).toHaveAttribute('data-visible-node-count', '4', { timeout: 250 });
+  }).toPass({ timeout: 15_000 });
+});
+
 test('keeps the universe and primary travel controls usable on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockSpatialWorld(page);

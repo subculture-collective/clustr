@@ -73,10 +73,11 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
       target.tagName === 'TEXTAREA' ||
       target.isContentEditable;
 
-    // Special handling for search focus shortcuts - these should work even when typing
-    const isSearchFocusShortcut = 
+    // Ctrl+K focuses search even while typing. A bare "/" does so only outside
+    // text fields; inside one it is a character the user is entering ("r/pics").
+    const isSearchFocusShortcut =
       (event.key === 'k' && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) ||
-      (event.key === '/' && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey);
+      (event.key === '/' && !isTyping && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey);
     
     if (isSearchFocusShortcut && actionsRef.current.onFocusSearch) {
       event.preventDefault();
