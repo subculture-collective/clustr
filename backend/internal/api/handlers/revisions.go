@@ -1147,6 +1147,12 @@ type spatialSearchResult struct {
 
 // Search exposes semantic labels from the full Spatial Catalog while keeping
 // the established frontend response shape during the compatibility window.
+// searchCandidateBound caps how many prefix matches a search ranks by value.
+// On the production catalog a two-letter prefix matches about 70,000 labels;
+// ranking them all means a heap fetch per row, while 2,000 covers every
+// label of a prefix such as "ask" (about 1,650) exactly.
+const searchCandidateBound = 2000
+
 func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("node"))
 	if query == "" {
@@ -1168,28 +1174,53 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
 		writeRevisionError(w, err)
 		return
 	}
+	// Three tiers: the entity whose id is the query, entities whose whole label
+	// is the query, then prefix matches; each tier is ordered by value. The
+	// prefix tier ranks the first searchCandidateBound labels in index order,
+	// so a very short prefix stays a bounded index-range read instead of a
+	// sort of every matching row, and prefixes with fewer matches than the
+	// bound are ranked exactly. The old query limited the prefix matches
+	// before sorting, so "ask" could return ten low-value posts and no
+	// AskReddit. The outer ORDER BY must name results.value: the select list
+	// casts value to text under the same name, and an unqualified "value"
+	// would sort that text, putting 917 above 67059287.
 	var rows *sql.Rows
 	if catalog.Valid {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,label,value::text,type,x,y,z FROM (
-  SELECT id,label,value,type,x,y,z,true AS exact_match
+  SELECT id,label,value,type,x,y,z,2 AS tier
   FROM spatial_catalog_entities e WHERE catalog_id=$1 AND id=$2
    AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
   UNION ALL
-  (SELECT id,label,value,type,x,y,z,false AS exact_match
+  (SELECT id,label,value,type,x,y,z,1 AS tier
    FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
      AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
-     AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   LIMIT $4)
-) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, catalog.Int64, query, prefix+"%", limit)
+     AND lower(left(label,128))=lower(left($2,128)) AND id<>$2
+   ORDER BY value DESC LIMIT $4)
+  UNION ALL
+  (SELECT id,label,value,type,x,y,z,0 AS tier FROM (
+     SELECT id,label,value,type,x,y,z
+     FROM spatial_catalog_entities e WHERE catalog_id=$1 AND type IN ('subreddit','user','post')
+       AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
+       AND lower(left(label,128)) LIKE lower($3) ESCAPE '\' AND lower(left(label,128))<>lower(left($2,128)) AND id<>$2
+     LIMIT $5) candidates
+   ORDER BY value DESC LIMIT $4)
+) results ORDER BY tier DESC,results.value DESC,results.id LIMIT $4`, catalog.Int64, query, prefix+"%", limit, searchCandidateBound)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT id,name,value::text,type,x,y,z FROM (
-  SELECT id,name,value,type,x,y,z,true AS exact_match
+  SELECT id,name,value,type,x,y,z,2 AS tier
   FROM graph_revision_nodes WHERE revision_id=$1 AND id=$2
   UNION ALL
-  (SELECT id,name,value,type,x,y,z,false AS exact_match
-   FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\' AND id<>$2
-   LIMIT $4)
-) results ORDER BY exact_match DESC,value DESC,id LIMIT $4`, revisionID, query, prefix+"%", limit)
+  (SELECT id,name,value,type,x,y,z,1 AS tier
+   FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128))=lower(left($2,128)) AND id<>$2
+   ORDER BY value DESC LIMIT $4)
+  UNION ALL
+  (SELECT id,name,value,type,x,y,z,0 AS tier FROM (
+     SELECT id,name,value,type,x,y,z
+     FROM graph_revision_nodes WHERE revision_id=$1 AND lower(left(name,128)) LIKE lower($3) ESCAPE '\'
+       AND lower(left(name,128))<>lower(left($2,128)) AND id<>$2
+     LIMIT $5) candidates
+   ORDER BY value DESC LIMIT $4)
+) results ORDER BY tier DESC,results.value DESC,results.id LIMIT $4`, revisionID, query, prefix+"%", limit, searchCandidateBound)
 	}
 	if err != nil {
 		writeRevisionError(w, err)
