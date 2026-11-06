@@ -63,7 +63,7 @@ interface Props {
     physics?: PhysicsConfig;
     focusNodeId?: string;
     selectedId?: string;
-    onNodeSelect?: (id?: string) => void;
+    onNodeSelect?: (id?: string, name?: string) => void;
     onInspectNode?: (id: string) => void;
     showLabels?: boolean;
     communityResult?: {
@@ -81,6 +81,31 @@ interface Props {
         enableAdaptiveLOD?: boolean;
     };
     onLODTierChange?: (tier: number) => void;
+}
+
+/**
+ * Place the camera so every finite point is in view, looking at the
+ * bounding sphere's centre. Returns that sphere, or null without points.
+ */
+function frameCameraOnNodes(
+    camera: THREE.PerspectiveCamera,
+    controls: OrbitControls,
+    nodes: ReadonlyArray<{ x?: number; y?: number; z?: number }>,
+): THREE.Sphere | null {
+    const points = nodes
+        .filter(node => Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z))
+        .map(node => new THREE.Vector3(node.x, node.y, node.z));
+    if (!points.length) return null;
+    const sphere = new THREE.Box3().setFromPoints(points).getBoundingSphere(new THREE.Sphere());
+    const distance = Math.max(160, sphere.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.3);
+    const direction = new THREE.Vector3(0.28, 0.18, 1).normalize();
+    camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    camera.near = Math.max(0.1, distance / 1000);
+    camera.far = Math.max(10000, distance * 12);
+    camera.updateProjectionMatrix();
+    controls.target.copy(sphere.center);
+    controls.update();
+    return sphere;
 }
 
 export default function Graph3DInstanced(props: Props) {
@@ -160,6 +185,8 @@ export default function Graph3DInstanced(props: Props) {
     // loop also draws while the camera moves or a LOD transition blends.
     const renderDirtyRef = useRef(true);
     const linkOpacityRef = useRef(linkOpacity);
+    // A community scene that should be framed as a whole once it is resident.
+    const frameSceneRef = useRef<SpatialScene | null>(null);
     const requestRegionRef = useRef<(camera: THREE.PerspectiveCamera, controls: OrbitControls) => void>(() => undefined);
     const sceneClientRef = useRef(spatialWorldClient);
     const sceneSourceRef = useRef<SpatialScene['source'] | null>(null);
@@ -351,6 +378,9 @@ export default function Graph3DInstanced(props: Props) {
             .then(spatialScene => {
                 loadedFocusRef.current = focusNodeId;
                 cameraRegionRef.current = false;
+                // A community scene holds the landmark's members, not the
+                // landmark itself, so there is no single node to fly to.
+                frameSceneRef.current = focusNodeId.startsWith('c:') ? spatialScene : null;
                 setScene(spatialScene);
                 setGraphData({ nodes: spatialScene.nodes, links: spatialScene.links });
             })
@@ -422,10 +452,31 @@ export default function Graph3DInstanced(props: Props) {
         controlsRef.current = controls;
         const handleControlsEnd = () => requestRegionRef.current(camera, controls);
         controls.addEventListener('end', handleControlsEnd);
-        // OrbitControls applies wheel and pointer input inside its own
-        // handlers, so the loop's update() call alone would miss those moves.
-        const markDirty = () => { renderDirtyRef.current = true; };
-        controls.addEventListener('change', markDirty);
+
+        // The camera pose of the last drawn frame. A frame is worth drawing
+        // when the pose has moved by at least a quarter of a pixel on screen;
+        // OrbitControls' own change test is 1e-6 world units, which in a
+        // ±100,000-unit world keeps a damping tail drawing invisible motion
+        // for seconds. This also covers input OrbitControls applies inside
+        // its own handlers, which update() alone would not report.
+        const lastDrawnPosition = new THREE.Vector3(NaN, NaN, NaN);
+        const lastDrawnTarget = new THREE.Vector3();
+        const lastDrawnQuaternion = new THREE.Quaternion();
+        const cameraMovedOnScreen = (): boolean => {
+            if (Number.isNaN(lastDrawnPosition.x)) return true;
+            const height = Math.max(1, container.clientHeight);
+            const distance = Math.max(1e-6, camera.position.distanceTo(controls.target));
+            const pixelsPerUnit = height / (2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+            const translation = (camera.position.distanceTo(lastDrawnPosition) + controls.target.distanceTo(lastDrawnTarget)) * pixelsPerUnit;
+            const angle = 2 * Math.acos(Math.min(1, Math.abs(camera.quaternion.dot(lastDrawnQuaternion))));
+            const rotation = angle * (height / THREE.MathUtils.degToRad(camera.fov));
+            return translation + rotation > 0.25;
+        };
+        const rememberDrawnPose = () => {
+            lastDrawnPosition.copy(camera.position);
+            lastDrawnTarget.copy(controls.target);
+            lastDrawnQuaternion.copy(camera.quaternion);
+        };
 
         // Add lights
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -457,7 +508,9 @@ export default function Graph3DInstanced(props: Props) {
         const labelRenderer = new SDFTextRenderer(scene, {
             maxLabels: DEFAULT_LOD_CONFIG.maxLabels,
             fontSize: 8,
+            onSync: () => { renderDirtyRef.current = true; },
         });
+        labelRenderer.setViewportHeight(container.clientHeight);
         labelRendererRef.current = labelRenderer;
 
         // Initialize LOD manager
@@ -500,10 +553,8 @@ export default function Graph3DInstanced(props: Props) {
             animationId = requestAnimationFrame(animate);
 
             const now = performance.now();
-            // update() reports whether damping or an external move changed the
-            // camera this tick; input applied inside OrbitControls' own
-            // handlers arrives through the 'change' listener instead.
-            const cameraMoved = controls.update();
+            controls.update(); // applies damping and pending input
+            const cameraMoved = cameraMovedOnScreen();
             movingStreak = cameraMoved ? movingStreak + 1 : 0;
 
             // Adaptive LOD judges sustained camera motion only. A still scene
@@ -545,27 +596,19 @@ export default function Graph3DInstanced(props: Props) {
             if (!dirty) return;
             renderDirtyRef.current = false;
             lastFrameTimeRef.current = now;
+            rememberDrawnPose();
 
             // Update node camera position for distance-based scaling
             if (nodeRenderer) {
                 nodeRenderer.updateCameraPosition();
             }
 
-            // Update label visibility and billboard orientation
+            // Update label visibility, screen size and billboard orientation.
+            // Labels keep a constant size on screen, so distance no longer
+            // decides whether they are legible; the top-priority set and the
+            // overlap test decide what is shown.
             if (labelRendererRef.current && showLabelsRef.current && labelSetRef.current.size > 0) {
-                // Zoom is distance to the navigation target, not distance to
-                // the universe origin. The old origin check hid labels around
-                // any far-away community even after the camera arrived there.
-                const cameraDistance = camera.position.distanceTo(controls.target);
-                const labelDistance = sceneSourceRef.current === 'overview'
-                    ? Number.POSITIVE_INFINITY
-                    : DEFAULT_LOD_CONFIG.labelVisibilityThreshold;
-                labelRendererRef.current.updateVisibility(
-                    camera,
-                    labelSetRef.current,
-                    cameraDistance,
-                    labelDistance
-                );
+                labelRendererRef.current.updateVisibility(camera, labelSetRef.current);
                 labelRendererRef.current.updateBillboard(camera);
             }
 
@@ -602,6 +645,7 @@ export default function Graph3DInstanced(props: Props) {
                 container.clientWidth,
                 container.clientHeight,
             );
+            labelRenderer.setViewportHeight(container.clientHeight);
             renderDirtyRef.current = true;
         };
         window.addEventListener('resize', handleResize);
@@ -611,7 +655,6 @@ export default function Graph3DInstanced(props: Props) {
             window.removeEventListener('resize', handleResize);
             cancelAnimationFrame(animationId);
             controls.removeEventListener('end', handleControlsEnd);
-            controls.removeEventListener('change', markDirty);
             controls.dispose();
             renderer.dispose();
             nodeRenderer.dispose();
@@ -769,25 +812,20 @@ export default function Graph3DInstanced(props: Props) {
         const communities = filtered.nodes.filter(node => node.type === 'community');
         const subreddits = filtered.nodes.filter(node => node.type === 'subreddit');
         const landmarks = communities.length ? communities : subreddits.length ? subreddits : filtered.nodes;
-        const points = landmarks
-            .filter(node => Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z))
-            .map(node => new THREE.Vector3(node.x, node.y, node.z));
-        if (!points.length) return;
-        const bounds = new THREE.Box3().setFromPoints(points);
-        const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+        const sphere = frameCameraOnNodes(cameraRef.current, controlsRef.current, landmarks);
+        if (!sphere) return;
         overviewRadiusRef.current = sphere.radius;
-        const camera = cameraRef.current;
-        const distance = Math.max(160, sphere.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.3);
-        const direction = new THREE.Vector3(0.28, 0.18, 1).normalize();
-        camera.position.copy(sphere.center).addScaledVector(direction, distance);
-        camera.near = Math.max(0.1, distance / 1000);
-        camera.far = Math.max(10000, distance * 12);
-        camera.updateProjectionMatrix();
-        controlsRef.current.target.copy(sphere.center);
-        controlsRef.current.update();
         lastFramedRevisionRef.current = scene.revision;
         renderDirtyRef.current = true;
     }, [scene, filtered.nodes]);
+
+    // Travel to a selected community: frame its whole resident neighbourhood,
+    // because the landmark node itself is not part of that scene.
+    useEffect(() => {
+        if (!scene || frameSceneRef.current !== scene || !cameraRef.current || !controlsRef.current) return;
+        frameSceneRef.current = null;
+        if (frameCameraOnNodes(cameraRef.current, controlsRef.current, scene.nodes)) renderDirtyRef.current = true;
+    }, [scene]);
 
     // Build degree map for label selection
     const degreeMap = useMemo(() => {
@@ -1079,7 +1117,8 @@ export default function Graph3DInstanced(props: Props) {
             const nodeId = pickNode(event);
             if (nodeId && onNodeSelect) {
                 hoveredNodeRef.current = nodeId;
-                onNodeSelect(nodeId);
+                const node = filtered.nodes.find(candidate => candidate.id === nodeId);
+                onNodeSelect(nodeId, node?.display_name || node?.name);
             }
         };
 
@@ -1094,19 +1133,24 @@ export default function Graph3DInstanced(props: Props) {
 
     const handleSceneKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
         if (!filtered.nodes.length) return;
+        const select = (index: number) => {
+            const node = filtered.nodes[index];
+            onNodeSelect?.(node.id, node.display_name || node.name);
+            return node.id;
+        };
         if (event.key === '[' || event.key === 'ArrowLeft') {
             event.preventDefault();
             keyboardNodeIndexRef.current = (keyboardNodeIndexRef.current - 1 + filtered.nodes.length) % filtered.nodes.length;
-            onNodeSelect?.(filtered.nodes[keyboardNodeIndexRef.current].id);
+            select(keyboardNodeIndexRef.current);
         } else if (event.key === ']' || event.key === 'ArrowRight') {
             event.preventDefault();
             keyboardNodeIndexRef.current = (keyboardNodeIndexRef.current + 1) % filtered.nodes.length;
-            onNodeSelect?.(filtered.nodes[keyboardNodeIndexRef.current].id);
+            select(keyboardNodeIndexRef.current);
         } else if (event.key === 'Enter') {
             event.preventDefault();
-            const id = filtered.nodes[keyboardNodeIndexRef.current].id;
-            onNodeSelect?.(id);
-            onInspectNode?.(id);
+            // The list may have shrunk since the index was last moved.
+            keyboardNodeIndexRef.current = Math.min(keyboardNodeIndexRef.current, filtered.nodes.length - 1);
+            onInspectNode?.(select(keyboardNodeIndexRef.current));
         }
     }, [filtered.nodes, onNodeSelect, onInspectNode]);
 
