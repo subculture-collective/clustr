@@ -156,6 +156,10 @@ export default function Graph3DInstanced(props: Props) {
     const regionAbortRef = useRef<AbortController | null>(null);
     // True while the resident scene came from a camera region request.
     const cameraRegionRef = useRef(false);
+    // Frames are drawn on demand. Effects that change the scene set this; the
+    // loop also draws while the camera moves or a LOD transition blends.
+    const renderDirtyRef = useRef(true);
+    const linkOpacityRef = useRef(linkOpacity);
     const requestRegionRef = useRef<(camera: THREE.PerspectiveCamera, controls: OrbitControls) => void>(() => undefined);
     const sceneClientRef = useRef(spatialWorldClient);
     const sceneSourceRef = useRef<SpatialScene['source'] | null>(null);
@@ -381,6 +385,10 @@ export default function Graph3DInstanced(props: Props) {
         const renderer = new THREE.WebGLRenderer({
             antialias: false,
             powerPreference: 'high-performance',
+            // Frames are drawn on demand, so the last frame must stay in the
+            // drawing buffer for screenshots, toDataURL and readPixels between
+            // draws. The copy this costs happens only when a frame is drawn.
+            preserveDrawingBuffer: true,
         });
         renderer.setSize(
             container.clientWidth,
@@ -414,6 +422,10 @@ export default function Graph3DInstanced(props: Props) {
         controlsRef.current = controls;
         const handleControlsEnd = () => requestRegionRef.current(camera, controls);
         controls.addEventListener('end', handleControlsEnd);
+        // OrbitControls applies wheel and pointer input inside its own
+        // handlers, so the loop's update() call alone would miss those moves.
+        const markDirty = () => { renderDirtyRef.current = true; };
+        controls.addEventListener('change', markDirty);
 
         // Add lights
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -473,65 +485,70 @@ export default function Graph3DInstanced(props: Props) {
 
         // Track last camera position for throttling
         let lastCameraUpdate = 0;
-        let lastLinkVisibilityUpdate = 0;
         const CAMERA_UPDATE_INTERVAL = 1000; // Update every 1 second
-        // Link visibility update: minimum interval between checks (actual timing depends on frame rate)
-        // LinkRenderer has built-in camera movement detection to skip redundant updates
-        const LINK_VISIBILITY_UPDATE_INTERVAL = 300; // Min 300ms between visibility checks
         const lastCamPos = { x: NaN, y: NaN, z: NaN };
         const EPSILON = 1e-3;
+        let lastLinkOpacity = NaN;
+        let lastTier: LODTier | null = null;
+        let movingStreak = 0;
 
-        // Animation loop
+        // The loop runs every frame so OrbitControls damping and LOD transitions
+        // can settle, but it draws only when something changed: a still scene
+        // costs no GPU work, no label pass and no frame-rate sample.
         let animationId: number;
         const animate = () => {
             animationId = requestAnimationFrame(animate);
-            
-            // Track FPS
+
             const now = performance.now();
-            const delta = now - lastFrameTimeRef.current;
-            if (delta > 0) {
-                const fps = 1000 / delta;
-                lodManager.recordFrame(fps);
+            // update() reports whether damping or an external move changed the
+            // camera this tick; input applied inside OrbitControls' own
+            // handlers arrives through the 'change' listener instead.
+            const cameraMoved = controls.update();
+            movingStreak = cameraMoved ? movingStreak + 1 : 0;
+
+            // Adaptive LOD judges sustained camera motion only. A still scene
+            // costs nothing however large it is, and a one-off scene update is
+            // not interaction, so neither may push the tier up or down.
+            if (movingStreak >= 2) {
+                const delta = now - lastFrameTimeRef.current;
+                if (delta > 0) lodManager.recordFrame(1000 / delta);
             }
-            lastFrameTimeRef.current = now;
-            
-            // Update LOD manager
-            lodManager.update(now);
+            if (movingStreak >= 2 || lodManager.isInTransition()) {
+                lodManager.update(now);
+            }
             const lodParams = lodManager.getRenderingParams(now);
-            
+
             // Update LOD tier state if changed (use ref to avoid stale closure)
             if (lodParams.tier !== lastEmittedTierRef.current) {
                 lastEmittedTierRef.current = lodParams.tier;
                 setCurrentLODTier(lodParams.tier);
                 onLODTierChangeRef.current?.(lodParams.tier);
             }
-            
-            controls.update();
+
+            let dirty = cameraMoved || renderDirtyRef.current;
+
+            // Link opacity follows the slider and the LOD tier; a tier
+            // transition blends it over a few frames.
+            const targetLinkOpacity = lodParams.showLinks
+                ? linkOpacityRef.current * lodParams.linkOpacityMultiplier
+                : 0;
+            if (targetLinkOpacity !== lastLinkOpacity) {
+                lastLinkOpacity = targetLinkOpacity;
+                linkRenderer.setOpacity(targetLinkOpacity);
+                dirty = true;
+            }
+            if (lodParams.tier !== lastTier) {
+                lastTier = lodParams.tier;
+                dirty = true;
+            }
+
+            if (!dirty) return;
+            renderDirtyRef.current = false;
+            lastFrameTimeRef.current = now;
 
             // Update node camera position for distance-based scaling
             if (nodeRenderer) {
                 nodeRenderer.updateCameraPosition();
-            }
-
-            // Update link visibility and opacity based on LOD
-            // updateVisibility() skips work if camera hasn't moved significantly
-            // refresh() skips work if visibility hasn't changed (needsUpdate flag)
-            const linkUpdateTime = Date.now();
-            if (
-                linkRenderer &&
-                linkUpdateTime - lastLinkVisibilityUpdate > LINK_VISIBILITY_UPDATE_INTERVAL
-            ) {
-                if (lodParams.showLinks) {
-                    linkRenderer.updateVisibility(camera);
-                    // Apply LOD opacity multiplier
-                    linkRenderer.setOpacity(linkOpacity * lodParams.linkOpacityMultiplier);
-                    linkRenderer.refresh();
-                } else {
-                    // Hide all links in LOW/EMERGENCY tiers
-                    linkRenderer.setOpacity(0);
-                    linkRenderer.refresh();
-                }
-                lastLinkVisibilityUpdate = linkUpdateTime;
             }
 
             // Update label visibility and billboard orientation
@@ -556,6 +573,7 @@ export default function Graph3DInstanced(props: Props) {
 
             // Throttle camera change emissions
             if (onCameraChangeRef.current) {
+                const linkUpdateTime = Date.now();
                 if (linkUpdateTime - lastCameraUpdate > CAMERA_UPDATE_INTERVAL) {
                     const { x, y, z } = camera.position;
                     // Only emit if position changed significantly
@@ -584,6 +602,7 @@ export default function Graph3DInstanced(props: Props) {
                 container.clientWidth,
                 container.clientHeight,
             );
+            renderDirtyRef.current = true;
         };
         window.addEventListener('resize', handleResize);
 
@@ -592,6 +611,7 @@ export default function Graph3DInstanced(props: Props) {
             window.removeEventListener('resize', handleResize);
             cancelAnimationFrame(animationId);
             controls.removeEventListener('end', handleControlsEnd);
+            controls.removeEventListener('change', markDirty);
             controls.dispose();
             renderer.dispose();
             nodeRenderer.dispose();
@@ -609,11 +629,12 @@ export default function Graph3DInstanced(props: Props) {
         };
     // Renderer identity follows the canvas/device lifecycle. Live visual values
     // are applied through focused effects below; rebuilding here would clear
-    // instance data and recreate the camera on every telemetry update.
+    // instance data and recreate the camera on every telemetry update. The
+    // container stays mounted through the initial load, so one renderer serves
+    // the whole session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         webglSupported,
-        initialLoadComplete,
         MAX_RENDER_NODES,
         MAX_RENDER_LINKS,
         // Note: mobileConfig.pixelRatio and isTouchDevice are now stable after first render
@@ -622,26 +643,25 @@ export default function Graph3DInstanced(props: Props) {
         isTouchDevice,
     ]);
 
-    // Track camera position for minimap (update every second to match original renderer)
+    // Track camera position for the minimap once a second. State only changes
+    // when the camera moved, so an idle scene causes no re-render. The parent
+    // hears about camera changes from the frame loop, not from here.
     useEffect(() => {
-        if (!cameraRef.current) return;
-
+        const same = (previous: { x: number; y: number; z: number } | undefined, x: number, y: number, z: number) =>
+            previous !== undefined && previous.x === x && previous.y === y && previous.z === z;
         const interval = setInterval(() => {
-            if (cameraRef.current) {
-                const { x, y, z } = cameraRef.current.position;
-                setCurrentCamera({ x, y, z });
-                if (controlsRef.current) {
-                    const target = controlsRef.current.target;
-                    setCurrentCameraTarget({ x: target.x, y: target.y, z: target.z });
-                }
-                if (onCameraChange) {
-                    onCameraChange({ x, y, z });
-                }
+            const camera = cameraRef.current;
+            if (!camera) return;
+            const { x, y, z } = camera.position;
+            setCurrentCamera(previous => (same(previous, x, y, z) ? previous : { x, y, z }));
+            const target = controlsRef.current?.target;
+            if (target) {
+                setCurrentCameraTarget(previous => (same(previous, target.x, target.y, target.z) ? previous : { x: target.x, y: target.y, z: target.z }));
             }
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [onCameraChange]);
+    }, []);
 
     // Process graph data with filters
     const filtered = useMemo(() => {
@@ -766,6 +786,7 @@ export default function Graph3DInstanced(props: Props) {
         controlsRef.current.target.copy(sphere.center);
         controlsRef.current.update();
         lastFramedRevisionRef.current = scene.revision;
+        renderDirtyRef.current = true;
     }, [scene, filtered.nodes]);
 
     // Build degree map for label selection
@@ -874,10 +895,12 @@ export default function Graph3DInstanced(props: Props) {
 
         nodeRendererRef.current.setNodeRelSize(nodeRelSize);
         nodeRendererRef.current.setNodeData(nodeData);
+        renderDirtyRef.current = true;
     }, [filtered, communityResult, nodeRelSize]);
 
     // Update labels when label set or filtered data changes
     useEffect(() => {
+        renderDirtyRef.current = true;
         if (!labelRendererRef.current || !showLabels || labelSet.size === 0) {
             // Clear labels if not showing
             if (labelRendererRef.current) {
@@ -992,18 +1015,21 @@ export default function Graph3DInstanced(props: Props) {
 
         linkRendererRef.current.updatePositions(positions);
         linkRendererRef.current.refresh();
+        renderDirtyRef.current = true;
     }, [filtered]);
 
-    // Update link opacity
+    // Update link opacity. The frame loop applies it together with the LOD
+    // multiplier, so the slider is not overridden a moment later.
     useEffect(() => {
-        if (!linkRendererRef.current) return;
-        linkRendererRef.current.setOpacity(linkOpacity);
+        linkOpacityRef.current = linkOpacity;
+        renderDirtyRef.current = true;
     }, [linkOpacity]);
 
     // Update size attenuation
     useEffect(() => {
         if (!nodeRendererRef.current) return;
         nodeRendererRef.current.setSizeAttenuation(sizeAttenuation);
+        renderDirtyRef.current = true;
     }, [sizeAttenuation]);
 
     // Handle mouse interactions
@@ -1116,6 +1142,7 @@ export default function Graph3DInstanced(props: Props) {
             cameraRef.current.position.set(pose.x, pose.y, pose.z);
             controlsRef.current.target.set(pose.targetX, pose.targetY, pose.targetZ);
             controlsRef.current.update();
+            renderDirtyRef.current = true;
         }
     }, [focusNodeId, filtered, nodeRelSize]);
 
@@ -1123,12 +1150,8 @@ export default function Graph3DInstanced(props: Props) {
     useEffect(() => {
         if (!sceneRef.current) return;
         sceneRef.current.background = new THREE.Color(theme === 'dark' ? 0x000000 : 0xf8f9fa);
+        renderDirtyRef.current = true;
     }, [theme]);
-
-    // Show loading skeleton during initial load
-    if (loading && !initialLoadComplete) {
-        return <LoadingSkeleton />;
-    }
 
     // Show WebGL warning if not supported
     if (!webglSupported) {
@@ -1137,6 +1160,13 @@ export default function Graph3DInstanced(props: Props) {
 
     return (
         <div className='w-full h-screen relative'>
+            {/* The skeleton overlays the canvas during the initial load instead of
+                replacing it, so the renderer and camera built on mount survive. */}
+            {loading && !initialLoadComplete && (
+                <div className='absolute inset-0 z-30'>
+                    <LoadingSkeleton />
+                </div>
+            )}
             {error && (
                 <div className='absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded-sm px-3 py-2 text-sm max-w-md'>
                     <div className='flex items-start gap-2'>

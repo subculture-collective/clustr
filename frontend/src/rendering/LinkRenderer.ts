@@ -58,20 +58,10 @@ export class LinkRenderer {
     private links: LinkData[] = [];
     private nodePositions: Map<string, { x: number; y: number; z: number }> =
         new Map();
-    private visibleNodeIds: Set<string> = new Set();
     private positionsBuffer: Float32Array;
     private maxLinks: number;
     private needsUpdate = false;
-    private lastCameraUpdate: {
-        position: THREE.Vector3;
-        target: THREE.Vector3;
-    } | null = null;
-    private positionsDirty = false; // Track if positions changed since last visibility update
     private lastPerformanceWarning = 0; // Timestamp of last performance warning
-    private readonly frustum = new THREE.Frustum();
-    private readonly cameraMatrix = new THREE.Matrix4();
-    private static readonly MIN_CAMERA_POSITION_DELTA = 10;
-    private static readonly MIN_CAMERA_TARGET_DELTA = 10;
     private static readonly PERFORMANCE_WARNING_THROTTLE = 5000; // Warn at most once per 5 seconds
 
     constructor(scene: THREE.Scene, config: LinkRendererConfig = {}) {
@@ -100,11 +90,15 @@ export class LinkRenderer {
             depthWrite: false,
         });
 
-        // Create LineSegments
+        // Create LineSegments. The buffer is filled once per scene and the GPU
+        // clips it, so there is no per-camera work. Three would otherwise cull
+        // the whole object by a bounding sphere computed from the empty buffer
+        // on the first frame, which hid every link once the origin left the view.
         this.lineSegments = new THREE.LineSegments(
             this.geometry,
             this.material,
         );
+        this.lineSegments.frustumCulled = false;
         this.scene.add(this.lineSegments);
     }
 
@@ -162,71 +156,15 @@ export class LinkRenderer {
         positions: Map<string, { x: number; y: number; z: number }>,
     ): void {
         this.nodePositions = positions;
-        this.positionsDirty = true; // Mark that positions have changed
-        this.needsUpdate = true;
-    }
-
-    /**
-     * Update visible node IDs based on camera frustum
-     * Call this when the camera moves significantly
-     */
-    public updateVisibility(camera: THREE.Camera): void {
-        // Check if camera moved significantly
-        const cameraPos = camera.position.clone();
-        const cameraTarget = new THREE.Vector3();
-
-        if (camera instanceof THREE.PerspectiveCamera) {
-            camera.getWorldDirection(cameraTarget);
-            cameraTarget.multiplyScalar(100).add(cameraPos);
-        }
-
-        // Force update if positions changed since last visibility update,
-        // even if camera hasn't moved (nodes may have moved in/out of frustum)
-        const forceUpdate = this.positionsDirty;
-
-        // Only update if camera moved significantly (optimization)
-        if (!forceUpdate && this.lastCameraUpdate) {
-            const posDiff = cameraPos.distanceTo(
-                this.lastCameraUpdate.position,
-            );
-            const targetDiff = cameraTarget.distanceTo(
-                this.lastCameraUpdate.target,
-            );
-            if (
-                posDiff < LinkRenderer.MIN_CAMERA_POSITION_DELTA &&
-                targetDiff < LinkRenderer.MIN_CAMERA_TARGET_DELTA
-            ) {
-                return; // Camera hasn't moved significantly and positions haven't changed
-            }
-        }
-
-        this.lastCameraUpdate = { position: cameraPos, target: cameraTarget };
-        this.positionsDirty = false; // Clear the flag after updating visibility
-
-        // Update frustum
-        camera.updateMatrixWorld();
-        this.cameraMatrix.multiplyMatrices(
-            camera.projectionMatrix,
-            camera.matrixWorldInverse,
-        );
-        this.frustum.setFromProjectionMatrix(this.cameraMatrix);
-
-        // Update visible nodes
-        this.visibleNodeIds.clear();
-        const tempVector = new THREE.Vector3();
-        for (const [nodeId, pos] of this.nodePositions.entries()) {
-            tempVector.set(pos.x, pos.y, pos.z);
-            if (this.frustum.containsPoint(tempVector)) {
-                this.visibleNodeIds.add(nodeId);
-            }
-        }
-
         this.needsUpdate = true;
     }
 
     /**
      * Refresh the link geometry buffer
-     * Call this after updating positions or visibility
+     * Call this after setting links or updating positions. Every link whose
+     * endpoints have positions is written; a link that leaves the view is
+     * clipped by the GPU rather than rebuilt on the CPU for each camera move,
+     * and a link with one endpoint off screen still shows the part in view.
      */
     public refresh(): void {
         if (!this.needsUpdate) {
@@ -237,23 +175,12 @@ export class LinkRenderer {
 
         let vertexCount = 0;
 
-        // Only render links where both endpoints are visible
         for (const link of this.links) {
             const sourcePos = this.nodePositions.get(link.source);
             const targetPos = this.nodePositions.get(link.target);
 
             // Skip if either node doesn't have a position
             if (!sourcePos || !targetPos) {
-                continue;
-            }
-
-            // Skip if either endpoint is not visible (frustum culling)
-            // If visibleNodeIds is empty, render all links (no culling active)
-            if (
-                this.visibleNodeIds.size > 0 &&
-                (!this.visibleNodeIds.has(link.source) ||
-                    !this.visibleNodeIds.has(link.target))
-            ) {
                 continue;
             }
 
@@ -316,9 +243,6 @@ export class LinkRenderer {
 
     /**
      * Get rendering statistics
-     * Note: visibleLinks calculation may be expensive for very large graphs (200k+ links)
-     * as it filters the entire links array. This is acceptable for debugging/monitoring
-     * but should not be called in performance-critical paths.
      */
     public getStats(): {
         totalLinks: number;
@@ -329,16 +253,8 @@ export class LinkRenderer {
         const drawRange = this.geometry.drawRange;
         return {
             totalLinks: this.links.length,
-            // visibleLinks is calculated on-demand for accuracy
-            // For performance-critical usage, use bufferedLinks instead
-            visibleLinks:
-                this.visibleNodeIds.size > 0 ?
-                    this.links.filter(
-                        l =>
-                            this.visibleNodeIds.has(l.source) &&
-                            this.visibleNodeIds.has(l.target),
-                    ).length
-                :   this.links.length,
+            // Every buffered link is submitted; the GPU clips what is off screen.
+            visibleLinks: drawRange.count / 2,
             bufferedLinks: drawRange.count / 2,
             drawCalls: drawRange.count > 0 ? 1 : 0,
         };
@@ -355,6 +271,5 @@ export class LinkRenderer {
         this.material.dispose();
         this.links = [];
         this.nodePositions.clear();
-        this.visibleNodeIds.clear();
     }
 }

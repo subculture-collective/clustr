@@ -144,6 +144,16 @@ function App() {
   // Ref for search bar to enable focus from keyboard shortcuts
   const searchInputRef = useRef<SearchBarHandle | null>(null);
   const closeFieldGuide = useCallback(() => setShowFieldGuide(false), []);
+  // Stable identities: the graph views bind pointer listeners against these.
+  const selectNode = useCallback((id?: string) => {
+    setFocusNodeId(id);
+    setSelectedId(id);
+  }, []);
+  const inspectNode = useCallback((id: string) => {
+    setFocusNodeId(id);
+    setSelectedId(id);
+    setExperienceMode("analyst");
+  }, []);
 
   // Persist view mode
   useEffect(() => {
@@ -453,15 +463,8 @@ function App() {
                 focusNodeId={focusNodeId}
                 showLabels={showLabels}
                 selectedId={selectedId}
-                onNodeSelect={(id?: string) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                }}
-                onInspectNode={(id) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                  setExperienceMode("analyst");
-                }}
+                onNodeSelect={selectNode}
+                onInspectNode={inspectNode}
                 communityResult={useCommunityColors ? communityResult : null}
                 usePrecomputedLayout={usePrecomputedLayout}
                 initialCamera={camera3dRef}
@@ -492,10 +495,7 @@ function App() {
                 focusNodeId={focusNodeId}
                 showLabels={showLabels}
                 selectedId={selectedId}
-                onNodeSelect={(id?: string) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                }}
+                onNodeSelect={selectNode}
                 communityResult={useCommunityColors ? communityResult : null}
                 usePrecomputedLayout={usePrecomputedLayout}
                 initialCamera={camera2dRef}
