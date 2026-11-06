@@ -227,6 +227,26 @@ describe('useKeyboardShortcuts', () => {
     document.body.removeChild(input);
   });
 
+  it('should let / be typed into an input', () => {
+    renderHook(() => useKeyboardShortcuts(actions));
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+
+    const event = new KeyboardEvent('keydown', {
+      key: '/',
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(actions.onFocusSearch).not.toHaveBeenCalled();
+
+    document.body.removeChild(input);
+  });
+
   it('should not trigger action if modifier key is wrong', () => {
     renderHook(() => useKeyboardShortcuts(actions));
 
