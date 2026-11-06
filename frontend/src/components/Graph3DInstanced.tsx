@@ -154,6 +154,8 @@ export default function Graph3DInstanced(props: Props) {
     const overviewRadiusRef = useRef<number | null>(null);
     const lastRegionSignatureRef = useRef<string | null>(null);
     const regionAbortRef = useRef<AbortController | null>(null);
+    // True while the resident scene came from a camera region request.
+    const cameraRegionRef = useRef(false);
     const requestRegionRef = useRef<(camera: THREE.PerspectiveCamera, controls: OrbitControls) => void>(() => undefined);
     const sceneClientRef = useRef(spatialWorldClient);
     const sceneSourceRef = useRef<SpatialScene['source'] | null>(null);
@@ -171,7 +173,17 @@ export default function Graph3DInstanced(props: Props) {
         if (!scene?.revision || !scene.catalog || focusNodeId || selectedId) return;
         const overviewRadius = overviewRadiusRef.current;
         const distance = camera.position.distanceTo(controls.target);
-        if (!overviewRadius || distance >= overviewRadius * 1.6) return;
+        if (!overviewRadius) return;
+        if (distance >= overviewRadius * 1.6) {
+            // Travelling back out of a camera region returns to the landmark
+            // overview; the camera stays where the user left it.
+            if (cameraRegionRef.current) {
+                cameraRegionRef.current = false;
+                regionAbortRef.current?.abort();
+                load();
+            }
+            return;
+        }
 
         const halfExtent = Math.max(20, distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.9);
         const quantum = Math.max(5, halfExtent / 4);
@@ -196,6 +208,7 @@ export default function Graph3DInstanced(props: Props) {
         }, controller.signal)
             .then(spatialScene => {
                 if (!spatialScene.nodes.length) return;
+                cameraRegionRef.current = true;
                 setScene(spatialScene);
                 setGraphData({ nodes: spatialScene.nodes, links: spatialScene.links });
             })
@@ -284,6 +297,7 @@ export default function Graph3DInstanced(props: Props) {
                 const nodeIds = new Set(spatialScene.nodes.filter(n => n.type === 'community' || !n.type || allowed.has(n.type)).map(n => n.id));
                 const data = { nodes: spatialScene.nodes.filter(n => nodeIds.has(n.id)), links: spatialScene.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target)) };
                 lastRegionSignatureRef.current = null;
+                cameraRegionRef.current = false;
                 setScene(spatialScene);
                 setGraphData(data);
                 setInitialLoadComplete(true);
@@ -332,6 +346,7 @@ export default function Graph3DInstanced(props: Props) {
         request
             .then(spatialScene => {
                 loadedFocusRef.current = focusNodeId;
+                cameraRegionRef.current = false;
                 setScene(spatialScene);
                 setGraphData({ nodes: spatialScene.nodes, links: spatialScene.links });
             })
@@ -677,8 +692,10 @@ export default function Graph3DInstanced(props: Props) {
             l => nodeIds.has(l.source) && nodeIds.has(l.target),
         );
 
-        // Filter to only linked nodes if enabled
-        if (onlyLinked) {
+        // "Linked only" hides isolated nodes in a scene that carries links.
+        // Region scenes are requested without links; applying it to them
+        // would hide every node.
+        if (onlyLinked && graphData.links.length > 0) {
             const linkedIds = new Set<string>();
             for (const link of links) {
                 linkedIds.add(link.source);
