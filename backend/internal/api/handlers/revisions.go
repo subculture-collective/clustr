@@ -792,18 +792,22 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
  FROM visible source
  JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=source.id
  JOIN visible target ON target.id=link.target
+), owned AS MATERIALIZED (
+ -- Read the visible entities once; each structural relation filters them.
+ SELECT id,type,parent_id,anchor_id,author_id
+ FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2)
 ), structural AS (
  SELECT author_id source,id target,'authorship' relation,true directed,1::bigint weight
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND author_id=ANY($2)
+ FROM owned WHERE author_id=ANY($2)
  UNION ALL
  SELECT id,parent_id,'published_in',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='post' AND parent_id=ANY($2)
+ FROM owned WHERE type='post' AND parent_id=ANY($2)
  UNION ALL
  SELECT id,anchor_id,'comment_on',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='comment' AND anchor_id=ANY($2)
+ FROM owned WHERE type='comment' AND anchor_id=ANY($2)
  UNION ALL
  SELECT parent_id,id,'reply',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='comment' AND parent_id LIKE 'comment_%' AND parent_id=ANY($2)
+ FROM owned WHERE type='comment' AND parent_id LIKE 'comment_%' AND parent_id=ANY($2)
 )
 SELECT source,target,relation,directed,weight FROM (
  SELECT * FROM materialized UNION ALL SELECT * FROM structural
@@ -877,10 +881,13 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 	useCatalog := catalog.Valid
 	if useCatalog {
 		var hasMembers bool
-		err = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
-SELECT 1 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND community_id=$2
+		// Check for members of the same types the node query returns. The type
+		// filter also lets PostgreSQL use the partial community index; without
+		// it a community absent from the catalog scanned the whole entity table.
+		err = h.db.QueryRowContext(r.Context(), fmt.Sprintf(`SELECT EXISTS(
+SELECT 1 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND community_id=$2 AND %s
 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
-)`, catalog.Int64, cid).Scan(&hasMembers)
+)`, typeFilter), catalog.Int64, cid).Scan(&hasMembers)
 		if err != nil {
 			writeRevisionError(w, err)
 			return
