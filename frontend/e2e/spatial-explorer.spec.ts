@@ -181,17 +181,18 @@ test('keeps the universe populated while travelling into a region and back out',
   if (!bounds) throw new Error('universe has no bounding box');
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
 
-  for (let tick = 0; tick < 6; tick++) {
+  // The camera applies a wheel tick on the next frame, so the number of ticks
+  // needed to cross the region threshold depends on frame timing. Keep
+  // scrolling until the scene changes instead of assuming a count.
+  await expect(async () => {
     await page.mouse.wheel(0, -240);
-    await page.waitForTimeout(60);
-  }
-  await expect(universe).toHaveAttribute('data-visible-node-count', '3');
+    await expect(universe).toHaveAttribute('data-visible-node-count', '3', { timeout: 250 });
+  }).toPass({ timeout: 15_000 });
 
-  for (let tick = 0; tick < 14; tick++) {
+  await expect(async () => {
     await page.mouse.wheel(0, 240);
-    await page.waitForTimeout(60);
-  }
-  await expect(universe).toHaveAttribute('data-visible-node-count', '4');
+    await expect(universe).toHaveAttribute('data-visible-node-count', '4', { timeout: 250 });
+  }).toPass({ timeout: 15_000 });
 });
 
 test('keeps the universe and primary travel controls usable on mobile', async ({ page }) => {
