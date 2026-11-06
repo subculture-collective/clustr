@@ -30,7 +30,7 @@ func expectPinnedRevision(mock sqlmock.Sqlmock, revision, catalog int64) {
 func TestTelemetryReturnsExactPinnedCatalogMeasurements(t *testing.T) {
 	handler, mock := newRevisionHandlerMock(t)
 	expectPinnedRevision(mock, 41, 73)
-	mock.ExpectQuery("SELECT.*spatial_catalog_entities.*public_entity_suppressions").WithArgs(int64(73), int64(41)).
+	mock.ExpectQuery("WITH active AS MATERIALIZED").WithArgs(int64(73), int64(41)).
 		WillReturnRows(sqlmock.NewRows([]string{"entities", "links", "subreddits", "users", "posts", "comments", "communities"}).
 			AddRow(1000, 900, 10, 20, 300, 670, 4))
 	mock.ExpectQuery("FROM spatial_catalog_entities e WHERE catalog_id=\\$1 AND type='subreddit'").WithArgs(int64(73), 2).

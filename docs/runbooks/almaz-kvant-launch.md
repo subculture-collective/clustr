@@ -65,61 +65,94 @@ replace a post-deploy canary on Almaz.
    [production-database-clone.md](production-database-clone.md). Run migrations
    and the full calculation against that isolated Kvant clone before scheduling
    a calculation against Almaz.
-2. Build and test the exact release checkout. Build all server, crawler,
-   precalculate, migration, and frontend images from the same commit.
-3. Push immutable images and record their digests. Never use `latest` in the
-   Kvant unit.
-4. Copy this checkout to `/opt/clustr` on Kvant, preserving ownership by the
-   `onnwee` user. Install the unit and timer from `deploy/kvant/`.
-5. Create `/etc/clustr/kvant-precalculate.env` from the example, owned by
-   `root:onnwee` with mode `0640`. Set a percent-encoded database URL whose host is
+2. Build and test from a clean checkout whose `HEAD` is descended from the
+   recorded `origin/main` base. Pass that exact `HEAD` as the worker image's
+   `COMMIT` build argument. Never build a production image from a mutable
+   checkout.
+3. Push the image, resolve its immutable digest, and create a release bundle:
+
+   ```bash
+   deploy/kvant/build-worker-release.sh \
+     "$PWD" "$HOME/.config/clustr/kvant-precalculate.env" \
+     registry.example/precalculate@sha256:NEW \
+     registry.example/precalculate@sha256:ROLLBACK \
+     ORIGIN_MAIN_SHA "$HOME/.local/share/clustr/releases/RELEASE_ID"
+   ```
+
+   The command fails closed if the checkout is dirty, the image is not pinned,
+   or `/app/precalculate --version` does not report the checkout SHA. Retain
+   `release.env`, `patches.tsv`, `SHA256SUMS`, the extracted worker binary, the
+   installed wrapper/units, and the runbook. `patches.tsv` is the complete
+   compiled change list; do not substitute an informal release description.
+4. Install the bundle's wrapper in `~/.local/libexec/clustr`, units in
+   `~/.config/systemd/user`, and runbook in `~/.local/share/doc/clustr`. The
+   normal Kvant deployment uses the user manager; root-owned unit templates are
+   retained only for installations that deliberately use the system manager.
+5. Create `~/.config/clustr/kvant-precalculate.env` from the example, owned by
+   `onnwee` with mode `0600`. Set a percent-encoded database URL whose host is
    `127.0.0.1` and port is the configured tunnel port. Do not copy Reddit OAuth
-   credentials into this file; the graph worker does not need them.
-6. Verify `ssh -o BatchMode=yes almaz true` as the service user and pin Almaz's
-   host key before enabling the timer.
+   credentials into this file; the graph worker does not need them. Compare its
+   checksum with `release.env` without printing the file.
+6. Verify `ssh -F /dev/null -o BatchMode=yes 10.0.0.200 true` as `onnwee` and
+   pin Almaz's host key before enabling the timer.
 7. Validate without starting a calculation:
 
    ```bash
-   sudo systemd-analyze verify /etc/systemd/system/clustr-precalculate.service
-   sudo systemd-analyze verify /etc/systemd/system/clustr-precalculate.timer
-   sudo systemctl daemon-reload
-   sudo systemctl list-timers clustr-precalculate.timer
+   systemd-analyze --user verify ~/.config/systemd/user/clustr-precalculate.service
+   systemd-analyze --user verify ~/.config/systemd/user/clustr-precalculate.timer
+   systemd-analyze --user verify ~/.config/systemd/user/clustr-spatial-catalog.service
+   systemd-analyze --user verify ~/.config/systemd/user/clustr-spatial-catalog-preflight.service
+   systemctl --user daemon-reload
+   systemctl --user list-timers clustr-precalculate.timer
    ```
 
 ## Production migration and first publication
 
 These are deliberate operator steps, not commands for unattended automation.
 
-1. Stop the old precalculate service if one exists. Leave the current API and
-   frontend serving their existing read model.
+1. Leave the digest-pinned hourly graph worker running during preparation.
+   For cutover, wait for its active run to finish, disable the user timer, and
+   prove both the unit and any `clustr-precalculate-*` container are absent.
+   Leave the current API/frontend serving the existing read model.
 2. Take a fresh Almaz database backup and verify its checksum and archive TOC.
-3. Run the migration image once against Almaz. Verify the migration ledger
-   contains `000028_crawl_lifecycle.up.sql`,
-   `000029_graph_revisions.up.sql`, and
-   `000030_spatial_catalog.up.sql`. Confirm `crawl_requests` has one row per
-   intended subreddit and inspect the active/backlog cohort counts.
+   Restore it to an isolated Kvant clone.
+3. Production may physically contain migrations 29–36 while its immutable
+   file ledger ends at 28. Never replay those migrations against that state.
+   Run `scripts/production/reconcile-schema-29-36.sh ... audit` on the fresh
+   clone, inspect its normalized schema, constraints, indexes, grants,
+   partitions, and pointer snapshot, then reconcile the clone using the audit's
+   schema fingerprint. Run the repository migration command and require it to
+   report current without applying SQL. Run integration and full calculation
+   gates on the clone. At production cutover, repeat the audit and reconcile
+   only when its fingerprint exactly equals the qualified clone:
+
+   ```bash
+   scripts/production/reconcile-schema-29-36.sh \
+     "$DATABASE_URL" backend/migrations audit /secure/evidence/prod-audit
+   scripts/production/reconcile-schema-29-36.sh \
+     "$DATABASE_URL" backend/migrations reconcile \
+     QUALIFIED_CLONE_SCHEMA_SHA256 /secure/evidence/prod-reconcile
+   ```
+
+   Verify the graph revision and catalog pointers are unchanged before and
+   after reconciliation. Any mismatch requires a new additive migration.
 4. Keep `CRAWLER_LIFECYCLE_ENABLED=false` for the first API restart. Keep
    revision reads disabled until the first immutable revision is present if the
    deployment health orchestration cannot tolerate a deliberately unready API.
-5. Run the first calculation manually on Kvant in initial-full mode and follow
-   its journal. This mode calculates the resident graph and the full labeled
-   catalog. Ordinary hourly runs use the same complete contract at a new source
-   watermark; they do not leave the catalog frozen at launch:
+5. Install the clean release bundle and run one graph-only canary. It must use
+   the already-published catalog and must not build or move a catalog:
 
    ```bash
-   sudo -u onnwee /opt/clustr/deploy/kvant/run-precalculation.sh \
-     /etc/clustr/kvant-precalculate.env --initial-full \
-     2>&1 | tee /var/tmp/clustr-initial-full.log
+   ~/.local/libexec/clustr/run-precalculation.sh \
+     ~/.config/clustr/kvant-precalculate.env graph-revision
    ```
 
-6. The service must exit successfully. On Almaz, verify all of the following
+6. The canary must exit within one hour and remain below 4 GiB peak RSS. On
+   Almaz, verify all of the following
    before switching reads:
    - the current revision pointer advanced exactly once;
    - node/link/community counts are within configured caps;
-   - catalog entity counts exactly match the four source entity tables at the
-     recorded watermark and every entity has a nonempty semantic label;
-   - catalog link endpoints are complete and catalog bounds are finite and
-     non-collapsed;
+   - the catalog pointer is still the pre-canary value;
    - no link has a missing endpoint;
    - coordinates and bounds are finite and non-collapsed;
    - `/ready` reports schema, crawl leases, and publication as healthy;
@@ -130,12 +163,18 @@ These are deliberate operator steps, not commands for unattended automation.
    meaningful separated landmarks, camera travel, selection, inspector,
    minimap heading, responsive layout, reduced motion, and no console/network
    errors.
-8. Enable the Kvant timer only after the manual publication passes:
+8. Enable the Kvant timer only after the manual publication passes, then retain
+   evidence for three consecutive successful scheduled runs:
 
    ```bash
-   sudo systemctl enable --now clustr-precalculate.timer
-   systemctl list-timers clustr-precalculate.timer
+   systemctl --user enable --now clustr-precalculate.timer
+   systemctl --user list-timers clustr-precalculate.timer
    ```
+
+The catalog preflight and rebuild units are static oneshots. They are never
+enabled and have no timer. Qualify `catalog-rebuild` separately on a fresh
+production clone; one hour, 4 GiB peak RSS, disk headroom, exact document
+coverage, orphan rejection, and pointer safety are hard gates.
 
 ## Crawler cutover
 
@@ -165,7 +204,7 @@ daily discovery promotion budgets continuously.
   repoint `graph_current_revision` in an operator transaction. There is not yet
   a dedicated rollback CLI, so record the old/new revision IDs and SQL result.
 - Stop future calculations with
-  `sudo systemctl disable --now clustr-precalculate.timer`. A running oneshot may
+  `systemctl --user disable --now clustr-precalculate.timer`. A running oneshot may
   be stopped independently; its signal-aware worker exits and leaves the prior
   published pointer intact unless promotion already committed.
 

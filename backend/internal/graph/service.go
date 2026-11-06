@@ -622,13 +622,25 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 		subProg.Done("")
 	}
 
-	if err := s.CalculateUserActivity(ctx); err != nil {
-		precalcErr = fmt.Errorf("failed to calculate user activity: %w", err)
-		return precalcErr
-	}
-	if err := s.CalculateSubredditRelationships(ctx); err != nil {
-		precalcErr = fmt.Errorf("failed to calculate subreddit relationships: %w", err)
-		return precalcErr
+	if q, ok := s.store.(*db.Queries); ok {
+		sqlDB, ok := q.DB().(*sql.DB)
+		if !ok {
+			precalcErr = errors.New("activity refresh requires a transactional database")
+			return precalcErr
+		}
+		if err := refreshActivityAndRelationships(ctx, sqlDB, !incrementalMode); err != nil {
+			precalcErr = fmt.Errorf("failed to refresh user activity: %w", err)
+			return precalcErr
+		}
+	} else {
+		if err := s.CalculateUserActivity(ctx); err != nil {
+			precalcErr = fmt.Errorf("failed to calculate user activity: %w", err)
+			return precalcErr
+		}
+		if err := s.CalculateSubredditRelationships(ctx); err != nil {
+			precalcErr = fmt.Errorf("failed to calculate subreddit relationships: %w", err)
+			return precalcErr
+		}
 	}
 
 	// Detailed content graph (optional)

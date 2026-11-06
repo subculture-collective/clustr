@@ -8,11 +8,17 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 )
 
+// databaseStatsEvery is how many collection ticks pass between exact source
+// table counts. Counting every comment and user takes seconds of sequential
+// scanning, and the totals move slowly, so they are not recounted every tick.
+const databaseStatsEvery = 10
+
 // Collector periodically collects and updates Prometheus metrics
 type Collector struct {
 	queries  *db.Queries
 	interval time.Duration
 	stop     chan struct{}
+	ticks    int
 }
 
 // NewCollector creates a new metrics collector
@@ -53,7 +59,10 @@ func (c *Collector) Stop() {
 func (c *Collector) collectMetrics(ctx context.Context) {
 	c.collectGraphMetrics(ctx)
 	c.collectCommunityMetrics(ctx)
-	c.collectDatabaseStats(ctx)
+	if c.ticks%databaseStatsEvery == 0 {
+		c.collectDatabaseStats(ctx)
+	}
+	c.ticks++
 	c.collectCrawlJobStats(ctx)
 }
 

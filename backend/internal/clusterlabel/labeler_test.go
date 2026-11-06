@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/onnwee/reddit-cluster-map/backend/internal/clusterlabel"
 )
@@ -28,7 +29,7 @@ func TestNoProviderPublishesDeterministicEvidenceLabel(t *testing.T) {
 	}
 }
 
-func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
+func TestProviderSchemaConstrainsGrounding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			ResponseFormat struct {
@@ -53,17 +54,11 @@ func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
 		if len(grounding.Items.Enum) != 4 {
 			t.Fatalf("grounding enum = %v", grounding.Items.Enum)
 		}
-		var method struct {
-			Const string `json:"const"`
-		}
-		if err := json.Unmarshal(request.ResponseFormat.JSONSchema.Schema.Properties["method_version"], &method); err != nil {
-			t.Fatal(err)
-		}
-		if method.Const != clusterlabel.PromptVersion {
-			t.Fatalf("method const = %q", method.Const)
+		if _, present := request.ResponseFormat.JSONSchema.Schema.Properties["method_version"]; present {
+			t.Fatal("method_version must be stamped locally, not requested from the provider")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"display_name\":\"Maker Commons\",\"evidence_grounding\":[\"woodworking\",\"maker\"],\"confidence\":0.9,\"method_version\":\"cluster-label-v1\"}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"display_name\":\"Maker Commons\",\"evidence_grounding\":[\"woodworking\",\"maker\"],\"confidence\":0.9}"}}]}`))
 	}))
 	defer server.Close()
 
@@ -74,6 +69,26 @@ func TestProviderSchemaConstrainsGroundingAndMethodVersion(t *testing.T) {
 	}
 	if result.Method != "provider" || result.DisplayName != "Maker Commons" || result.Grounding != "woodworking · maker" {
 		t.Fatalf("unexpected provider result: %+v", result)
+	}
+	if result.MethodVersion != clusterlabel.PromptVersion {
+		t.Fatalf("method version = %q, want %q", result.MethodVersion, clusterlabel.PromptVersion)
+	}
+}
+
+func TestProviderFailureChangesNoDeterministicEvidence(t *testing.T) {
+	evidence := clusterlabel.Evidence{Representatives: []string{"DIY", "woodworking"}, Topics: []string{"maker", "tools"}}
+	want, err := clusterlabel.Generate(context.Background(), evidence, clusterlabel.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := clusterlabel.Generate(context.Background(), evidence, clusterlabel.Config{
+		BaseURL: "http://127.0.0.1:1", APIKey: "unreachable", Model: "test", Timeout: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed != want {
+		t.Fatalf("provider failure changed deterministic label evidence: got %+v want %+v", failed, want)
 	}
 }
 

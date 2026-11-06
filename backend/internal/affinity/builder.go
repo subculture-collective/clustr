@@ -42,7 +42,7 @@ func BuildShadow(ctx context.Context, database *sql.DB, watermark time.Time) (in
 		return 0, fmt.Errorf("create affinity build: %w", err)
 	}
 	fail := func(stage string, cause error) (int64, error) {
-		_, _ = database.ExecContext(context.Background(), `UPDATE affinity_builds SET status='failed',failure_reason=$2,validation_result=jsonb_build_object('valid',false,'stage',$3),completed_at=now() WHERE id=$1`, buildID, cause.Error(), stage)
+		_, _ = database.ExecContext(context.Background(), `UPDATE affinity_builds SET status='failed',failure_reason=$2,validation_result=jsonb_build_object('valid',false,'stage',$3::text),completed_at=now() WHERE id=$1`, buildID, cause.Error(), stage)
 		return buildID, fmt.Errorf("affinity shadow %d at %s: %w", buildID, stage, cause)
 	}
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})

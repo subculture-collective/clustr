@@ -131,8 +131,10 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 
 	// Initialize each node to its own community
 	nodeToCommunity := make(map[string]int)
+	communityDegrees := make(map[int]int, len(nodeIDs))
 	for i, id := range nodeIDs {
 		nodeToCommunity[id] = i
+		communityDegrees[i] += degrees[id]
 	}
 
 	// Louvain algorithm: iteratively move nodes to neighboring communities
@@ -174,7 +176,7 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 					continue
 				}
 
-				gain := modularityGain(nodeID, currentCommunity, targetCommunity, nodeToCommunity, adjacency, degrees, totalWeight)
+				gain := modularityGain(nodeID, currentCommunity, targetCommunity, nodeToCommunity, adjacency, degrees, communityDegrees, totalWeight)
 				if gain > bestGain {
 					bestGain = gain
 					bestCommunity = targetCommunity
@@ -184,6 +186,8 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 			// Move to best community if improvement found
 			if bestCommunity != currentCommunity {
 				nodeToCommunity[nodeID] = bestCommunity
+				communityDegrees[currentCommunity] -= degrees[nodeID]
+				communityDegrees[bestCommunity] += degrees[nodeID]
 				improved = true
 			}
 		}
@@ -276,8 +280,10 @@ func (s *Service) detectCommunitiesFromData(nodes []db.ListGraphNodesByWeightRow
 	}, nil
 }
 
-// modularityGain calculates the gain in modularity from moving a node between communities
-func modularityGain(nodeID string, fromCommunity, toCommunity int, nodeToCommunity map[string]int, adjacency map[string]map[string]int, degrees map[string]int, totalWeight int) float64 {
+// modularityGain calculates the gain in modularity from moving a node between communities.
+// communityDegrees holds the summed node degree of every community, including
+// the moving node in fromCommunity; callers keep it current as nodes move.
+func modularityGain(nodeID string, fromCommunity, toCommunity int, nodeToCommunity map[string]int, adjacency map[string]map[string]int, degrees map[string]int, communityDegrees map[int]int, totalWeight int) float64 {
 	if totalWeight == 0 {
 		return 0
 	}
@@ -302,22 +308,11 @@ func modularityGain(nodeID string, fromCommunity, toCommunity int, nodeToCommuni
 	m2 := float64(2 * totalWeight)
 	gain := (float64(weightTo-weightFrom) / m2) -
 		(float64(nodeDegree) *
-			(float64(sumDegrees(toCommunity, nodeToCommunity, degrees)) -
-				float64(sumDegrees(fromCommunity, nodeToCommunity, degrees))) /
+			(float64(communityDegrees[toCommunity]) -
+				float64(communityDegrees[fromCommunity])) /
 			(m2 * m2))
 
 	return gain
-}
-
-// sumDegrees sums the degrees of all nodes in a community
-func sumDegrees(community int, nodeToCommunity map[string]int, degrees map[string]int) int {
-	sum := 0
-	for node, comm := range nodeToCommunity {
-		if comm == community {
-			sum += degrees[node]
-		}
-	}
-	return sum
 }
 
 // calculateModularity calculates the modularity of the current community structure
@@ -356,27 +351,61 @@ func (s *Service) storeCommunities(ctx context.Context, queries *db.Queries, res
 		return nil, fmt.Errorf("clear community tables: %w", err)
 	}
 
-	// Insert communities and build mapping from member IDs to database community IDs
-	nodeToDB := make(map[string]int32)
-	for _, comm := range result.Communities {
-		dbComm, err := queries.CreateCommunity(ctx, db.CreateCommunityParams{
-			Label:      comm.Label,
-			Size:       int32(len(comm.Members)),
-			Modularity: sql.NullFloat64{Float64: result.Modularity, Valid: true},
-		})
+	// Reserve the community IDs up front so the batched insert assigns the same
+	// ascending identifiers, in the same order, as one INSERT per community.
+	communityIDs := make([]int32, 0, len(result.Communities))
+	if len(result.Communities) > 0 {
+		rows, err := queries.DB().QueryContext(ctx, `SELECT nextval(pg_get_serial_sequence('graph_communities','id'))::integer FROM generate_series(1,$1)`, len(result.Communities))
 		if err != nil {
-			return nil, fmt.Errorf("create community %d: %w", comm.ID, err)
+			return nil, fmt.Errorf("reserve community ids: %w", err)
 		}
-
-		// Insert members and map them to the database community ID
-		for _, memberID := range comm.Members {
-			if err := queries.CreateCommunityMember(ctx, db.CreateCommunityMemberParams{
-				CommunityID: dbComm.ID,
-				NodeID:      memberID,
-			}); err != nil {
-				return nil, fmt.Errorf("add member %s to community %d: %w", memberID, dbComm.ID, err)
+		for rows.Next() {
+			var id int32
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("reserve community ids: %w", err)
 			}
-			nodeToDB[memberID] = dbComm.ID
+			communityIDs = append(communityIDs, id)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("reserve community ids: %w", err)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("reserve community ids: %w", err)
+		}
+		if len(communityIDs) != len(result.Communities) {
+			return nil, fmt.Errorf("reserve community ids: got %d of %d", len(communityIDs), len(result.Communities))
+		}
+		sort.Slice(communityIDs, func(i, j int) bool { return communityIDs[i] < communityIDs[j] })
+	}
+
+	nodeToDB := make(map[string]int32)
+	labels := make([]string, len(result.Communities))
+	sizes := make([]int32, len(result.Communities))
+	var memberCommunities []int32
+	var memberNodes []string
+	for i, comm := range result.Communities {
+		labels[i] = comm.Label
+		sizes[i] = int32(len(comm.Members))
+		for _, memberID := range comm.Members {
+			memberCommunities = append(memberCommunities, communityIDs[i])
+			memberNodes = append(memberNodes, memberID)
+			nodeToDB[memberID] = communityIDs[i]
+		}
+	}
+	if len(communityIDs) > 0 {
+		if _, err := queries.DB().ExecContext(ctx, `INSERT INTO graph_communities(id,label,size,modularity)
+SELECT id,label,size,$4 FROM unnest($1::integer[],$2::text[],$3::integer[]) AS c(id,label,size)`,
+			pq.Array(communityIDs), pq.Array(labels), pq.Array(sizes),
+			sql.NullFloat64{Float64: result.Modularity, Valid: true}); err != nil {
+			return nil, fmt.Errorf("create communities: %w", err)
+		}
+	}
+	if len(memberNodes) > 0 {
+		if _, err := queries.DB().ExecContext(ctx, `INSERT INTO graph_community_members(community_id,node_id)
+SELECT community_id,node_id FROM unnest($1::integer[],$2::text[]) AS m(community_id,node_id)
+ON CONFLICT (community_id,node_id) DO NOTHING`, pq.Array(memberCommunities), pq.Array(memberNodes)); err != nil {
+			return nil, fmt.Errorf("add community members: %w", err)
 		}
 	}
 
@@ -402,13 +431,20 @@ func (s *Service) storeCommunities(ctx context.Context, queries *db.Queries, res
 	}
 
 	// Store inter-community links
-	for key, weight := range linkWeights {
-		if err := queries.CreateCommunityLink(ctx, db.CreateCommunityLinkParams{
-			SourceCommunityID: key[0],
-			TargetCommunityID: key[1],
-			Weight:            int32(weight),
-		}); err != nil {
-			return nil, fmt.Errorf("create community link %d->%d: %w", key[0], key[1], err)
+	if len(linkWeights) > 0 {
+		sources := make([]int32, 0, len(linkWeights))
+		targets := make([]int32, 0, len(linkWeights))
+		weights := make([]int32, 0, len(linkWeights))
+		for key, weight := range linkWeights {
+			sources = append(sources, key[0])
+			targets = append(targets, key[1])
+			weights = append(weights, int32(weight))
+		}
+		if _, err := queries.DB().ExecContext(ctx, `INSERT INTO graph_community_links(source_community_id,target_community_id,weight)
+SELECT source_id,target_id,weight FROM unnest($1::integer[],$2::integer[],$3::integer[]) AS l(source_id,target_id,weight)
+ON CONFLICT (source_community_id,target_community_id)
+DO UPDATE SET weight=EXCLUDED.weight,updated_at=now()`, pq.Array(sources), pq.Array(targets), pq.Array(weights)); err != nil {
+			return nil, fmt.Errorf("create community links: %w", err)
 		}
 	}
 
@@ -799,8 +835,10 @@ func (s *Service) detectHierarchicalCommunities(ctx context.Context, queries *db
 func runSinglePassLouvain(nodeIDs []string, adjacency map[string]map[string]int, degrees map[string]int, totalWeight int) map[string]int {
 	// Initialize each node to its own community
 	nodeToCommunity := make(map[string]int)
+	communityDegrees := make(map[int]int, len(nodeIDs))
 	for i, id := range nodeIDs {
 		nodeToCommunity[id] = i
+		communityDegrees[i] += degrees[id]
 	}
 
 	// Louvain algorithm: iteratively move nodes to neighboring communities
@@ -842,7 +880,7 @@ func runSinglePassLouvain(nodeIDs []string, adjacency map[string]map[string]int,
 					continue
 				}
 
-				gain := modularityGain(nodeID, currentCommunity, targetCommunity, nodeToCommunity, adjacency, degrees, totalWeight)
+				gain := modularityGain(nodeID, currentCommunity, targetCommunity, nodeToCommunity, adjacency, degrees, communityDegrees, totalWeight)
 				if gain > bestGain {
 					bestGain = gain
 					bestCommunity = targetCommunity
@@ -852,6 +890,8 @@ func runSinglePassLouvain(nodeIDs []string, adjacency map[string]map[string]int,
 			// Move to best community if improvement found
 			if bestCommunity != currentCommunity {
 				nodeToCommunity[nodeID] = bestCommunity
+				communityDegrees[currentCommunity] -= degrees[nodeID]
+				communityDegrees[bestCommunity] += degrees[nodeID]
 				improved = true
 			}
 		}
@@ -913,49 +953,51 @@ func (s *Service) storeHierarchy(ctx context.Context, queries *db.Queries, hiera
 		return fmt.Errorf("clear community hierarchy: %w", err)
 	}
 
-	// Store each level
+	// Store each level with one array-bound statement instead of one round
+	// trip per node; the worker reaches the database through a tunnel.
 	totalRows := 0
-	var firstError error
 	for _, level := range hierarchy {
+		n := len(level.NodeToCommunity)
+		if n == 0 {
+			log.Printf("✅ Stored level %d: 0 rows", level.Level)
+			continue
+		}
+		nodeIDs := make([]string, 0, n)
+		communityIDs := make([]int32, 0, n)
+		parentIDs := make([]sql.NullInt32, 0, n)
+		cxs := make([]sql.NullFloat64, 0, n)
+		cys := make([]sql.NullFloat64, 0, n)
+		czs := make([]sql.NullFloat64, 0, n)
 		for nodeID, commID := range level.NodeToCommunity {
 			var parentCommID sql.NullInt32
 			if parent, ok := level.CommunityToParent[commID]; ok && parent != -1 {
 				parentCommID = sql.NullInt32{Int32: int32(parent), Valid: true}
 			}
-
-			// Check if centroid exists for this community
-			centroid, hasCentroid := level.CommunityCentroids[commID]
 			var cx, cy, cz sql.NullFloat64
-			if hasCentroid {
+			if centroid, ok := level.CommunityCentroids[commID]; ok {
 				cx = sql.NullFloat64{Float64: centroid[0], Valid: true}
 				cy = sql.NullFloat64{Float64: centroid[1], Valid: true}
 				cz = sql.NullFloat64{Float64: centroid[2], Valid: true}
 			}
-
-			if err := queries.InsertCommunityHierarchy(ctx, db.InsertCommunityHierarchyParams{
-				NodeID:            nodeID,
-				Level:             int32(level.Level),
-				CommunityID:       int32(commID),
-				ParentCommunityID: parentCommID,
-				CentroidX:         cx,
-				CentroidY:         cy,
-				CentroidZ:         cz,
-			}); err != nil {
-				log.Printf("⚠️ failed to insert hierarchy row for node %s at level %d: %v", nodeID, level.Level, err)
-				if firstError == nil {
-					firstError = fmt.Errorf("failed to insert hierarchy row for node %s at level %d: %w", nodeID, level.Level, err)
-				}
-			} else {
-				totalRows++
-			}
+			nodeIDs = append(nodeIDs, nodeID)
+			communityIDs = append(communityIDs, int32(commID))
+			parentIDs = append(parentIDs, parentCommID)
+			cxs = append(cxs, cx)
+			cys = append(cys, cy)
+			czs = append(czs, cz)
 		}
-		log.Printf("✅ Stored level %d: %d rows", level.Level, len(level.NodeToCommunity))
+		if _, err := queries.DB().ExecContext(ctx, `INSERT INTO graph_community_hierarchy(node_id,level,community_id,parent_community_id,centroid_x,centroid_y,centroid_z)
+SELECT node_id,$2,community_id,parent_id,cx,cy,cz
+FROM unnest($1::text[],$3::integer[],$4::integer[],$5::double precision[],$6::double precision[],$7::double precision[])
+  AS h(node_id,community_id,parent_id,cx,cy,cz)`,
+			pq.Array(nodeIDs), int32(level.Level), pq.Array(communityIDs), pq.Array(parentIDs),
+			pq.Array(cxs), pq.Array(cys), pq.Array(czs)); err != nil {
+			return fmt.Errorf("store hierarchy level %d: %w", level.Level, err)
+		}
+		totalRows += n
+		log.Printf("✅ Stored level %d: %d rows", level.Level, n)
 	}
 
 	log.Printf("✅ Stored hierarchical community structure: %d total rows across %d levels", totalRows, len(hierarchy))
-
-	if firstError != nil {
-		return firstError
-	}
 	return nil
 }
