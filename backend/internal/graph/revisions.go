@@ -153,6 +153,15 @@ RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
 		_ = tx.Rollback()
 		return fail(stage, cause)
 	}
+	// Per-stage durations are logged once after commit so a slow publication
+	// can be attributed without sampling pg_stat_activity.
+	stageStart := time.Now()
+	stageTimings := make([]any, 0, 32)
+	mark := func(stage string) {
+		now := time.Now()
+		stageTimings = append(stageTimings, stage+"_ms", now.Sub(stageStart).Milliseconds())
+		stageStart = now
+	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(48487755497810)`); err != nil {
 		return failTx("publication_lock", err)
 	}
@@ -169,6 +178,7 @@ RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
 	if _, err = tx.ExecContext(ctx, `SET LOCAL enable_nestloop = off`); err != nil {
 		return failTx("publication_join_plan", err)
 	}
+	mark("setup")
 
 	// Match both sides' best weighted membership overlap. Mutual-best matching
 	// prevents one old landmark from being assigned to both sides of a split.
@@ -197,6 +207,7 @@ LEFT JOIN graph_revision_communities old ON old.revision_id=p.revision_id AND ol
 	if _, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX revision_community_map_stable_id_idx ON revision_community_map(stable_id)`); err != nil {
 		return failTx("community_matching_unique_ids", err)
 	}
+	mark("community_matching")
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_communities(revision_id,community_id,parent_id,level,label,size,x,y,z)
 SELECT $1,m.stable_id,NULL,0,c.label,c.size,
@@ -207,6 +218,7 @@ FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id`, id)
 	if err != nil {
 		return failTx("community_landmarks", err)
 	}
+	mark("community_landmarks")
 	// Community numbers are implementation detail, not useful landmarks. Name
 	// each territory from its three strongest subreddit members while retaining
 	// the stable community ID and coordinates across publications.
@@ -231,6 +243,7 @@ WHERE c.revision_id=$1 AND labels.stable_id=c.community_id`, id)
 	if err != nil {
 		return failTx("community_labels", err)
 	}
+	mark("community_labels")
 
 	// Each typed branch is a bounded, indexable top-N lookup.  Do not use a
 	// window over every workspace node here: a detailed crawl can contain
@@ -280,6 +293,7 @@ LEFT JOIN graph_revision_communities landmark ON landmark.revision_id=$1 AND lan
 	if err != nil {
 		return failTx("spatial_layout", err)
 	}
+	mark("spatial_layout")
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_community_members(revision_id,community_id,node_id)
 SELECT $1,map.stable_id,m.node_id FROM graph_community_members m
@@ -288,6 +302,7 @@ JOIN graph_revision_nodes n ON n.revision_id=$1 AND n.id=m.node_id`, id)
 	if err != nil {
 		return failTx("community_members", err)
 	}
+	mark("community_members")
 	// A landmark without a resident member cannot be approached or inspected in
 	// this revision, so it must not appear as an empty overview destination.
 	_, err = tx.ExecContext(ctx, `DELETE FROM graph_revision_communities c
@@ -298,6 +313,7 @@ WHERE c.revision_id=$1 AND NOT EXISTS (
 	if err != nil {
 		return failTx("empty_communities", err)
 	}
+	mark("empty_communities")
 
 	// Give PostgreSQL real cardinality statistics for the resident entity set.
 	// Parsing string graph IDs inside an inline CTE led the production-sized
@@ -322,6 +338,7 @@ ON revision_selected_entities(entity_type,entity_id)`); err != nil {
 	if _, err = tx.ExecContext(ctx, `ANALYZE revision_selected_entities`); err != nil {
 		return failTx("selected_entities_analyze", err)
 	}
+	mark("selected_entities")
 
 	// Source projection is set-based. Repeated facts increase weight; undirected
 	// overlap is canonicalized once instead of materializing reverse duplicates.
@@ -377,6 +394,7 @@ LIMIT $2`, id, options.LinkCap, options.PostCap, options.CommentCap)
 	if err != nil {
 		return failTx("typed_projection", err)
 	}
+	mark("typed_projection")
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_community_links(revision_id,source_community_id,target_community_id,weight)
 SELECT $1,LEAST(sm.community_id,tm.community_id),GREATEST(sm.community_id,tm.community_id),sum(l.weight)
@@ -387,6 +405,7 @@ WHERE l.revision_id=$1 AND sm.community_id<>tm.community_id GROUP BY 2,3`, id)
 	if err != nil {
 		return failTx("community_routes", err)
 	}
+	mark("community_routes")
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_bundles(revision_id,source_community_id,target_community_id,weight,control_x,control_y,control_z)
 SELECT $1,l.source_community_id,l.target_community_id,l.weight,(s.x+t.x)/2,(s.y+t.y)/2,(s.z+t.z)/2
 FROM graph_revision_community_links l JOIN graph_revision_communities s ON s.revision_id=$1 AND s.community_id=l.source_community_id
@@ -394,6 +413,7 @@ JOIN graph_revision_communities t ON t.revision_id=$1 AND t.community_id=l.targe
 	if err != nil {
 		return failTx("bundles", err)
 	}
+	mark("bundles")
 
 	var nodes, links, communities int64
 	var minX, maxX, minY, maxY, minZ, maxZ float64
@@ -407,6 +427,7 @@ JOIN graph_revision_communities t ON t.revision_id=$1 AND t.community_id=l.targe
 	if err != nil {
 		return failTx("counts", err)
 	}
+	mark("counts")
 	if nodes == 0 || links == 0 || communities == 0 || minX == maxX || minY == maxY || minZ == maxZ || minX < -1e12 || maxX > 1e12 || minY < -1e12 || maxY > 1e12 || minZ < -1e12 || maxZ > 1e12 {
 		return failTx("validation", fmt.Errorf("invalid or empty spatial world: nodes=%d links=%d communities=%d bounds=[%g,%g,%g,%g,%g,%g]", nodes, links, communities, minX, maxX, minY, maxY, minZ, maxZ))
 	}
@@ -420,14 +441,18 @@ JOIN graph_revision_communities t ON t.revision_id=$1 AND t.community_id=l.targe
 	if err != nil {
 		return failTx("promote", err)
 	}
+	mark("finalize")
 	if err = tx.Commit(); err != nil {
 		return failTx("commit", err)
 	}
+	mark("commit")
 	if err := RetainPublishedRevisions(ctx, database, options.Retention); err != nil {
 		// Publication already committed and is valid. Retention is intentionally
 		// best-effort so a cleanup failure cannot take the current world offline.
 		logger.WarnContext(ctx, "Published graph revision but retention cleanup failed", "revision_id", id, "error", err)
 	}
+	mark("retention")
+	logger.InfoContext(ctx, "Publication stage timings", append([]any{"revision_id", id}, stageTimings...)...)
 	return id, nil
 }
 
