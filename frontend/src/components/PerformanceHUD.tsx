@@ -198,7 +198,7 @@ export default function PerformanceHUD({
     return (
         <div
             ref={containerRef}
-            className={`fixed z-50 bg-black/80 text-green-400 font-mono text-xs px-3 py-2 rounded pointer-events-none whitespace-pre
+            className={`fixed z-50 bg-black/80 text-green-400 font-mono text-xs px-3 py-2 rounded-sm pointer-events-none whitespace-pre
                 ${isMobile 
                     ? 'top-16 right-2' /* Mobile: top-right */
                     : 'top-16 left-2' /* Desktop: top-left */

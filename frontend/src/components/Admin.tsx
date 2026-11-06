@@ -241,13 +241,13 @@ function Admin({ onViewMode }: AdminProps) {
                     handleLogin();
                   }
                 }}
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-sm text-white focus:outline-hidden focus:border-blue-500"
                 placeholder="Enter admin token"
               />
             </div>
             <button
               onClick={handleLogin}
-              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors"
+              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm font-medium transition-colors"
             >
               Login
             </button>
@@ -267,13 +267,13 @@ function Admin({ onViewMode }: AdminProps) {
           <div className="flex gap-2">
             <button
               onClick={() => onViewMode("3d")}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-sm transition-colors"
             >
               Back to Graph
             </button>
             <button
               onClick={() => setIsAuthenticated(false)}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded transition-colors"
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-sm transition-colors"
             >
               Logout
             </button>
@@ -284,7 +284,7 @@ function Admin({ onViewMode }: AdminProps) {
         <div className="flex gap-4 mt-4">
           <button
             onClick={() => setActiveTab("jobs")}
-            className={`px-4 py-2 rounded transition-colors ${
+            className={`px-4 py-2 rounded-sm transition-colors ${
               activeTab === "jobs"
                 ? "bg-blue-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -294,7 +294,7 @@ function Admin({ onViewMode }: AdminProps) {
           </button>
           <button
             onClick={() => setActiveTab("settings")}
-            className={`px-4 py-2 rounded transition-colors ${
+            className={`px-4 py-2 rounded-sm transition-colors ${
               activeTab === "settings"
                 ? "bg-blue-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -304,7 +304,7 @@ function Admin({ onViewMode }: AdminProps) {
           </button>
           <button
             onClick={() => setActiveTab("audit")}
-            className={`px-4 py-2 rounded transition-colors ${
+            className={`px-4 py-2 rounded-sm transition-colors ${
               activeTab === "audit"
                 ? "bg-blue-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -318,7 +318,7 @@ function Admin({ onViewMode }: AdminProps) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         {error && (
-          <div className="bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded mb-4">
+          <div className="bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-sm mb-4">
             {error}
             <button
               onClick={() => setError("")}
@@ -334,31 +334,31 @@ function Admin({ onViewMode }: AdminProps) {
             {/* Job Stats */}
             {jobStats && (
               <div className="grid grid-cols-5 gap-4 mb-6">
-                <div className="bg-gray-800 p-4 rounded">
+                <div className="bg-gray-800 p-4 rounded-sm">
                   <div className="text-gray-400 text-sm">Queued</div>
                   <div className="text-2xl font-bold text-yellow-500">
                     {jobStats.queued_count}
                   </div>
                 </div>
-                <div className="bg-gray-800 p-4 rounded">
+                <div className="bg-gray-800 p-4 rounded-sm">
                   <div className="text-gray-400 text-sm">Running</div>
                   <div className="text-2xl font-bold text-blue-500">
                     {jobStats.running_count}
                   </div>
                 </div>
-                <div className="bg-gray-800 p-4 rounded">
+                <div className="bg-gray-800 p-4 rounded-sm">
                   <div className="text-gray-400 text-sm">Failed</div>
                   <div className="text-2xl font-bold text-red-500">
                     {jobStats.failed_count}
                   </div>
                 </div>
-                <div className="bg-gray-800 p-4 rounded">
+                <div className="bg-gray-800 p-4 rounded-sm">
                   <div className="text-gray-400 text-sm">Completed</div>
                   <div className="text-2xl font-bold text-green-500">
                     {jobStats.completed_count}
                   </div>
                 </div>
-                <div className="bg-gray-800 p-4 rounded">
+                <div className="bg-gray-800 p-4 rounded-sm">
                   <div className="text-gray-400 text-sm">Total</div>
                   <div className="text-2xl font-bold">{jobStats.total_count}</div>
                 </div>
@@ -371,7 +371,7 @@ function Admin({ onViewMode }: AdminProps) {
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-white focus:outline-none focus:border-blue-500"
+                className="bg-gray-800 border border-gray-700 rounded-sm px-3 py-1 text-white focus:outline-hidden focus:border-blue-500"
               >
                 <option value="queued">Queued</option>
                 <option value="crawling">Running</option>
@@ -381,7 +381,7 @@ function Admin({ onViewMode }: AdminProps) {
             </div>
 
             {/* Jobs Table */}
-            <div className="bg-gray-800 rounded overflow-hidden">
+            <div className="bg-gray-800 rounded-sm overflow-hidden">
               <table className="w-full">
                 <thead className="bg-gray-700">
                   <tr>
@@ -414,7 +414,7 @@ function Admin({ onViewMode }: AdminProps) {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <span
-                          className={`px-2 py-1 rounded text-xs ${
+                          className={`px-2 py-1 rounded-sm text-xs ${
                             job.status === "queued"
                               ? "bg-yellow-900 text-yellow-200"
                               : job.status === "crawling"
@@ -443,7 +443,7 @@ function Admin({ onViewMode }: AdminProps) {
                               updateJobPriority(job.id, newPriority);
                             }
                           }}
-                          className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm"
+                          className="w-20 bg-gray-700 border border-gray-600 rounded-sm px-2 py-1 text-sm"
                         />
                       </td>
                       <td className="px-4 py-3 text-sm">{job.retries || 0}</td>
@@ -451,7 +451,7 @@ function Admin({ onViewMode }: AdminProps) {
                         {job.status === "failed" && (
                           <button
                             onClick={() => retryJob(job.id)}
-                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors"
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-sm text-xs transition-colors"
                           >
                             Retry
                           </button>
@@ -459,7 +459,7 @@ function Admin({ onViewMode }: AdminProps) {
                         {job.status === "queued" && (
                           <button
                             onClick={() => updateJobStatus(job.id, "failed")}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs transition-colors"
+                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded-sm text-xs transition-colors"
                           >
                             Cancel
                           </button>
@@ -480,7 +480,7 @@ function Admin({ onViewMode }: AdminProps) {
 
         {activeTab === "settings" && settings && (
           <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded">
+            <div className="bg-gray-800 p-6 rounded-sm">
               <h2 className="text-xl font-bold mb-4">Service Controls</h2>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -521,7 +521,7 @@ function Admin({ onViewMode }: AdminProps) {
               </div>
             </div>
 
-            <div className="bg-gray-800 p-6 rounded">
+            <div className="bg-gray-800 p-6 rounded-sm">
               <h2 className="text-xl font-bold mb-4">Rate Limits</h2>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -537,7 +537,7 @@ function Admin({ onViewMode }: AdminProps) {
                       })
                     }
                     step="0.1"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -552,7 +552,7 @@ function Admin({ onViewMode }: AdminProps) {
                         rate_limit_global: parseFloat(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -567,13 +567,13 @@ function Admin({ onViewMode }: AdminProps) {
                         rate_limit_per_ip: parseFloat(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="bg-gray-800 p-6 rounded">
+            <div className="bg-gray-800 p-6 rounded-sm">
               <h2 className="text-xl font-bold mb-4">Layout Settings</h2>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -588,7 +588,7 @@ function Admin({ onViewMode }: AdminProps) {
                         layout_max_nodes: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -603,13 +603,13 @@ function Admin({ onViewMode }: AdminProps) {
                         layout_iterations: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="bg-gray-800 p-6 rounded">
+            <div className="bg-gray-800 p-6 rounded-sm">
               <h2 className="text-xl font-bold mb-4">Graph Content Limits</h2>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -624,7 +624,7 @@ function Admin({ onViewMode }: AdminProps) {
                         posts_per_sub_in_graph: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -639,7 +639,7 @@ function Admin({ onViewMode }: AdminProps) {
                         comments_per_post_in_graph: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -654,7 +654,7 @@ function Admin({ onViewMode }: AdminProps) {
                         max_author_content_links: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
                 <div>
@@ -669,7 +669,7 @@ function Admin({ onViewMode }: AdminProps) {
                         max_posts_per_sub: parseInt(e.target.value),
                       })
                     }
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-sm px-3 py-2"
                   />
                 </div>
               </div>
@@ -678,7 +678,7 @@ function Admin({ onViewMode }: AdminProps) {
         )}
 
         {activeTab === "audit" && (
-          <div className="bg-gray-800 rounded overflow-hidden">
+          <div className="bg-gray-800 rounded-sm overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-700">
                 <tr>

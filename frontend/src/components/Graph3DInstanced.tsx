@@ -1121,10 +1121,10 @@ export default function Graph3DInstanced(props: Props) {
     return (
         <div className='w-full h-screen relative'>
             {error && (
-                <div className='absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded px-3 py-2 text-sm max-w-md'>
+                <div className='absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded-sm px-3 py-2 text-sm max-w-md'>
                     <div className='flex items-start gap-2'>
                         <svg
-                            className='w-5 h-5 flex-shrink-0 mt-0.5'
+                            className='w-5 h-5 shrink-0 mt-0.5'
                             fill='none'
                             viewBox='0 0 24 24'
                             stroke='currentColor'
@@ -1143,7 +1143,7 @@ export default function Graph3DInstanced(props: Props) {
                             <p className='text-xs opacity-90'>{error}</p>
                             <button
                                 onClick={() => load()}
-                                className='mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm font-medium transition-colors'
+                                className='mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded-sm text-sm font-medium transition-colors'
                             >
                                 Retry
                             </button>
@@ -1152,7 +1152,7 @@ export default function Graph3DInstanced(props: Props) {
                 </div>
             )}
             {loading && initialLoadComplete && (
-                <div className='absolute top-2 left-2 z-20 bg-black/50 text-white rounded px-3 py-2 text-sm'>
+                <div className='absolute top-2 left-2 z-20 bg-black/50 text-white rounded-sm px-3 py-2 text-sm'>
                     Updating graph…
                 </div>
             )}

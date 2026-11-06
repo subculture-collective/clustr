@@ -1173,9 +1173,9 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
         />
       )}
       {error && (
-        <div className="absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded px-3 py-2 text-sm max-w-md">
+        <div className="absolute top-2 left-2 z-20 bg-red-900/70 text-red-100 rounded-sm px-3 py-2 text-sm max-w-md">
           <div className="flex items-start gap-2">
-            <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div className="flex-1">
@@ -1183,7 +1183,7 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
               <p className="text-xs opacity-90">{error}</p>
               <button
                 onClick={() => load()}
-                className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm font-medium transition-colors"
+                className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded-sm text-sm font-medium transition-colors"
               >
                 Retry
               </button>
@@ -1192,18 +1192,18 @@ function Graph3DOriginal(props: Omit<Props, 'enableAdaptiveLOD' | 'onLODTierChan
         </div>
       )}
       {isLoading && initialLoadComplete && (
-        <div className="absolute top-2 left-2 z-20 bg-black/50 text-white rounded px-3 py-2 text-sm">
+        <div className="absolute top-2 left-2 z-20 bg-black/50 text-white rounded-sm px-3 py-2 text-sm">
           Updating graph…
         </div>
       )}
       {!isLoading && activeTypes.length === 0 && (
-        <div className="absolute top-2 left-2 z-20 bg-black/50 text-white rounded px-3 py-2 text-sm">
+        <div className="absolute top-2 left-2 z-20 bg-black/50 text-white rounded-sm px-3 py-2 text-sm">
           Enable at least one node type in the controls to view the graph.
         </div>
       )}
-      <div className="absolute top-2 left-2 z-10 bg-black/50 text-white rounded px-3 py-2 text-sm flex items-center gap-3">
+      <div className="absolute top-2 left-2 z-10 bg-black/50 text-white rounded-sm px-3 py-2 text-sm flex items-center gap-3">
         <button
-          className="border border-white/30 rounded px-2 py-1 hover:bg-white/10"
+          className="border border-white/30 rounded-sm px-2 py-1 hover:bg-white/10"
           onClick={() => load()}
         >
           Reload

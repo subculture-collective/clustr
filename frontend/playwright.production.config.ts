@@ -23,7 +23,7 @@ export default defineConfig({
     },
   }],
   webServer: {
-    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${productionPort}`,
+    command: `VITE_CATALOG_ENABLED=true npm run build && npm run preview -- --host 127.0.0.1 --port ${productionPort}`,
     url: productionURL,
     reuseExistingServer: false,
     timeout: 180_000,

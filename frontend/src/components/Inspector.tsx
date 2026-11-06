@@ -143,7 +143,7 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
         <div className="flex justify-between items-center p-4 border-b border-gray-700">
           <div><span className="sr-only">Node Inspector</span><p className="instrument-label">Attention lock</p><h3 className="mt-1 font-semibold text-lg" id="inspector-heading">{displayName}</h3></div>
           <button
-            className="text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-800"
+            className="text-gray-400 hover:text-white transition-colors px-2 py-1 rounded-sm hover:bg-gray-800"
             onClick={onClear}
             aria-label="Close inspector"
           >
@@ -211,7 +211,7 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
           )}
 
           {error && !nodeDetails && (
-            <div className="bg-red-900/30 border border-red-700 rounded p-3 text-sm">
+            <div className="bg-red-900/30 border border-red-700 rounded-sm p-3 text-sm">
               <p className="text-red-200">{error}</p>
             </div>
           )}
@@ -226,7 +226,7 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
                       <div>
                         <span className="text-xs text-gray-400 uppercase tracking-wide">Type</span>
                         <p className="text-sm">
-                          <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-blue-900/50 text-blue-200">
+                          <span className="inline-block px-2 py-1 rounded-sm text-xs font-medium bg-blue-900/50 text-blue-200">
                             {displayType}
                           </span>
                         </p>
@@ -302,7 +302,7 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
                           const hasDegree = isNeighborInfo(neighbor);
                           return (
                             <button
-                              className="w-full text-left p-3 rounded hover:bg-gray-800/70 transition-colors border border-gray-700/50 hover:border-gray-600"
+                              className="w-full text-left p-3 rounded-sm hover:bg-gray-800/70 transition-colors border border-gray-700/50 hover:border-gray-600"
                               onClick={() => onFocus(neighbor.id)}
                               title={`Navigate to ${neighbor.name || neighbor.id}`}
                             >
@@ -313,14 +313,14 @@ export default function Inspector({ selected, onClear, onFocus }: Props) {
                                   </p>
                                   {neighbor.type && (
                                     <p className="text-xs text-gray-400 mt-1">
-                                      <span className="inline-block px-1.5 py-0.5 rounded text-xs bg-gray-700/50">
+                                      <span className="inline-block px-1.5 py-0.5 rounded-sm text-xs bg-gray-700/50">
                                         {neighbor.type}
                                       </span>
                                     </p>
                                   )}
                                 </div>
                                 {hasDegree && (
-                                  <div className="ml-2 text-xs text-gray-400 flex-shrink-0">
+                                  <div className="ml-2 text-xs text-gray-400 shrink-0">
                                     {(neighbor as NeighborInfo).degree} connections
                                   </div>
                                 )}

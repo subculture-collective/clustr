@@ -41,7 +41,7 @@ export default function ShareButton({ getState }: Props) {
       }`}>
       <button
         onClick={handleShare}
-        className={`instrument-panel instrument-button rounded px-3 py-2 text-xs ${
+        className={`instrument-panel instrument-button rounded-sm px-3 py-2 text-xs ${
           copied
             ? "text-[#78d6b0]"
             : "text-white"

@@ -1,11 +1,13 @@
-# Reddit Cluster Map
+# Clustr
 
-[![CI](https://github.com/onnwee/reddit-cluster-map/actions/workflows/ci.yml/badge.svg)](https://github.com/onnwee/reddit-cluster-map/actions/workflows/ci.yml)
+![Clustr identity](docs/brand/clustr/readme-lockup.png)
+
+[CI on Gitea](https://git.subcult.tv/subculture-collective/clustr/actions)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
 
 Collect, analyze, and visualize relationships between Reddit communities and users as an interactive 3D network graph.
 
-**[Changelog](CHANGELOG.md)** • **[Contributing](CONTRIBUTING.md)** • **[Releases](https://github.com/subculture-collective/reddit-cluster-map/releases)**
+**[Changelog](CHANGELOG.md)** • **[Contributing](CONTRIBUTING.md)** • **[Releases](https://git.subcult.tv/subculture-collective/clustr/releases)**
 
 ---
 
@@ -239,3 +241,15 @@ Key environment variables (selected):
 
 See `docs/visualization-modes.md` and `docs/community-detection.md` for feature details.
 See `frontend/README.md` for local dev and env hints.
+
+## License
+
+Licensed under `GPL-3.0-or-later`. See [LICENSE](LICENSE).
+
+## Brand assets
+
+The product identity and selected public exports are recorded in [the brand handoff](docs/brand/clustr/GUIDE.md) and [source hashes](docs/brand/clustr/export.json). Regenerate from SUBCULT Studio with `python3 studio/scripts/export_remaining_brand.py clustr /path/to/this/repository`; use `--check` to verify the export without writing.
+
+The [automatic frontend deployment](docs/automatic-frontend-deployment.md) path
+promotes verified main CI to the existing Almaz frontend. Backend and Catalog
+promotion retain their separate release gates.

@@ -1,28 +1,22 @@
 name: CI
 
 on:
+  workflow_call:
+  workflow_dispatch:
   push:
     branches: [ main, uplink/deploy-branch ]
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: reddit_cluster_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.13'
+          go-version: '1.26.10'
           cache: true
           cache-dependency-path: backend/go.sum
 
@@ -47,26 +41,33 @@ jobs:
       - name: Check for Go vulnerabilities
         working-directory: ./backend
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
-      - name: Run tests
+      - name: Run static security analysis
         working-directory: ./backend
-        env:
-          DATABASE_URL: postgres://postgres:postgres@postgres:5432/reddit_cluster_test?sslmode=disable
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.10
+          gosec -quiet -include=G101,G102,G103,G106,G107,G201,G202,G203,G204,G301,G302,G303,G305,G401,G402,G403,G405,G406,G407,G501,G502,G503,G504,G505,G506,G601,G602 ./...
+
+      - name: Run migrated database and race tests
+        run: bash scripts/test-backend-ci.sh
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: actions/upload-artifact@v3
         with:
-          files: ./backend/coverage.out
-          flags: backend
           name: backend-coverage
-        continue-on-error: true
+          path: backend/coverage.out
+          retention-days: 7
+          if-no-files-found: error
 
   test-frontend:
     name: Test Frontend
+    permissions:
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -75,7 +76,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -95,21 +96,221 @@ jobs:
         working-directory: ./frontend
         run: npm run test:coverage
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage
+        uses: actions/upload-artifact@v3
         with:
-          files: ./frontend/coverage/lcov.info
-          flags: frontend
           name: frontend-coverage
-        continue-on-error: true
+          path: frontend/coverage/lcov.info
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Build frontend
         working-directory: ./frontend
         run: npm run build
 
+      - name: Check bundle size
+        if: github.event_name == 'pull_request'
+        id: check_bundle_size
+        working-directory: ./frontend
+        run: npm run size
+        continue-on-error: true
+
+      - name: Save current bundle stats
+        if: github.event_name == 'pull_request'
+        working-directory: ./frontend
+        run: |
+          npm run --silent size:json > bundle-stats.json
+
+      - name: Upload bundle visualizer
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: bundle-stats
+          path: frontend/dist/stats.html
+          retention-days: 30
+
+      - name: Checkout base branch
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Set up Node.js for base
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies (base)
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: npm ci
+        continue-on-error: true
+
+      - name: Build bundle (base)
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: npm run build
+        continue-on-error: true
+
+      - name: Get base bundle stats
+        if: github.event_name == 'pull_request'
+        working-directory: ./base/frontend
+        run: |
+          npm run --silent size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
+        continue-on-error: true
+
+      - name: Compare bundle sizes
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read stats files
+            let currentStats = [];
+            let baseStats = [];
+
+            try {
+              currentStats = JSON.parse(fs.readFileSync('frontend/bundle-stats.json', 'utf8'));
+            } catch (e) {
+              core.setFailed('Failed to read current bundle stats: ' + e.message);
+              return;
+            }
+
+            try {
+              baseStats = JSON.parse(fs.readFileSync('base/frontend/bundle-stats-base.json', 'utf8'));
+            } catch (e) {
+              console.log('No base stats available');
+            }
+
+            if (!Array.isArray(currentStats) || currentStats.length === 0 || currentStats.some(item => typeof item.name !== 'string' || !Number.isFinite(item.size) || !Number.isFinite(item.sizeLimit) || typeof item.passed !== 'boolean')) {
+              core.setFailed('Current bundle stats are empty or invalid');
+              return;
+            }
+
+            function formatSize(bytes) {
+              const abs = Math.abs(bytes);
+              if (abs < 1024) return `${abs.toFixed(0)} B`;
+              if (abs < 1024 * 1024) return `${(abs / 1024).toFixed(2)} KB`;
+              return `${(abs / (1024 * 1024)).toFixed(2)} MB`;
+            }
+
+            function formatDiff(current, base) {
+              if (!base || base === 0) return 'N/A';
+              const diff = current - base;
+              const pct = Math.abs((diff / base) * 100).toFixed(2);
+              const sign = diff > 0 ? '+' : diff < 0 ? '-' : '';
+              const emoji = diff > 0 ? '🔴' : diff < 0 ? '🟢' : '⚪';
+              return `${emoji} ${sign}${formatSize(diff)} (${sign}${pct}%)`;
+            }
+
+            let comment = '## 📦 Bundle Size Report\n\n';
+            comment += '| File | Current | Base | Diff |\n';
+            comment += '|------|---------|------|------|\n';
+
+            let anyExceeded = false;
+            let significantIncrease = false;
+
+            for (const item of currentStats) {
+              const baseItem = baseStats.find(b => b.name === item.name);
+              const baseSize = baseItem ? baseItem.size : null;
+
+              comment += `| ${item.name} | ${formatSize(item.size)} | ${baseSize ? formatSize(baseSize) : 'N/A'} | ${formatDiff(item.size, baseSize)} |\n`;
+
+              // Check if size exceeds limit
+              if (!item.passed) {
+                anyExceeded = true;
+              }
+
+              // Check for significant increases (>5% or >50KB)
+              if (baseSize) {
+                const diff = item.size - baseSize;
+                const pctIncrease = (diff / baseSize) * 100;
+
+                // Keep the absolute CSS cap and reject material relative growth.
+                const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' || diff > 5 * 1024;
+                if ((pctIncrease > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {
+                  significantIncrease = true;
+                }
+              }
+            }
+
+            comment += '\nCSS relative growth requires more than 5 KB added; absolute limits still apply.\n\n';
+
+            // Report issues
+            if (anyExceeded) {
+              comment += '### ⚠️ Bundle Size Limit Exceeded\n\n';
+              for (const item of currentStats) {
+                if (!item.passed) {
+                  comment += `- ❌ ${item.name} (${formatSize(item.size)}) exceeds limit of ${formatSize(item.sizeLimit)}\n`;
+                }
+              }
+              comment += '\n';
+            }
+
+            if (significantIncrease && !anyExceeded) {
+              comment += '### ⚠️ Significant Bundle Size Increase\n\n';
+              for (const item of currentStats) {
+                const baseItem = baseStats.find(b => b.name === item.name);
+                if (baseItem) {
+                  const diff = item.size - baseItem.size;
+                  const pctIncrease = (diff / baseItem.size) * 100;
+
+                  // Keep the absolute CSS cap and reject material relative growth.
+                const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' || diff > 5 * 1024;
+                if ((pctIncrease > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {
+                    comment += `- ${item.name} increased by ${formatSize(diff)} (${pctIncrease.toFixed(2)}%), exceeding the threshold of 5% or 50KB\n`;
+                  }
+                }
+              }
+              comment += '\n';
+            }
+
+            comment += '\n📊 [View detailed bundle analysis](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
+
+            // Post or update comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Bundle Size Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+            // Fail if limits are exceeded
+            if (anyExceeded) {
+              core.setFailed('Bundle size exceeds configured limits');
+            }
+
+            // Fail on significant increases, retaining the CSS noise floor.
+            if (significantIncrease && !anyExceeded) {
+              core.setFailed('Bundle size increased significantly (>5%, with a 5KB CSS floor, or >50KB)');
+            }
+
   visual-regression:
     name: Visual Regression Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-frontend]
 
     steps:
@@ -119,7 +320,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -158,9 +359,11 @@ jobs:
   build-backend-images:
     name: Build Backend Docker Images
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-backend]
 
     strategy:
+      fail-fast: false
       matrix:
         component: [server, crawler, precalculate, migrate]
 
@@ -172,14 +375,14 @@ jobs:
         id: dockerfile
         run: |
           if [ "${{ matrix.component }}" = "server" ]; then
-            echo "file=Dockerfile" >> $GITHUB_OUTPUT
+            echo "file=Dockerfile" >> "$GITHUB_OUTPUT"
           else
-            echo "file=Dockerfile.${{ matrix.component }}" >> $GITHUB_OUTPUT
+            echo "file=Dockerfile.${{ matrix.component }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build Docker image
         run: |
-          docker build \
+          docker build --pull \
             --file "./backend/${{ steps.dockerfile.outputs.file }}" \
             --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
             --build-arg "VERSION=${{ github.ref_name }}" \
@@ -187,9 +390,17 @@ jobs:
             --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
             ./backend
 
+      - name: Scan the built server image
+        if: matrix.component == 'server'
+        run: |
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table reddit-cluster-${{ matrix.component }}:${{ github.sha }}
+
   build-frontend-image:
     name: Build Frontend Docker Image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [test-frontend]
 
     steps:
@@ -198,7 +409,141 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build \
+          docker build --pull \
             --file ./frontend/Dockerfile \
             --tag "reddit-cluster-frontend:${{ github.sha }}" \
             ./frontend
+
+      - name: Scan the built image
+        run: |
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table reddit-cluster-frontend:${{ github.sha }}
+
+  secrets:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Scan changed commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            gitleaks git --redact --log-opts="$BASE_SHA..HEAD"
+          else
+            gitleaks git --redact
+          fi
+
+  frontend-deploy:
+    name: Deploy verified frontend to Almaz
+    needs: [test-backend, test-frontend, visual-regression, build-backend-images, build-frontend-image, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DEPLOY_REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Reuse an already accepted frontend artifact
+        id: artifact
+        if: github.server_url == 'https://git.subcult.tv' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          umask 077
+          deploy_dir=$(mktemp -d)
+          trap 'rm -rf "$deploy_dir"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
+          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
+            -o ConnectTimeout=15 onnwee@10.0.0.200)
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$deploy_dir/artifact.json"
+          python3 - "$deploy_dir/artifact.json" "$GITHUB_OUTPUT" <<'PYCODE'
+          import json, re, sys
+          from pathlib import Path
+          info = json.loads(Path(sys.argv[1]).read_text())
+          available = info.get("available") is True
+          if available:
+              assert re.fullmatch(r"[0-9a-f]{64}", info.get("html_sha256", ""))
+          with Path(sys.argv[2]).open("a") as output:
+              output.write("available=" + str(available).lower() + "\n")
+          PYCODE
+      - name: Build deployable images from the verified revision
+        if: steps.artifact.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          docker build --build-arg VITE_API_URL=/api --build-arg VITE_CATALOG_ENABLED=false -f frontend/Dockerfile --label "org.opencontainers.image.revision=$DEPLOY_REVISION" \
+            --label "org.opencontainers.image.source=https://git.subcult.tv/subculture-collective/clustr" -t "$image" frontend
+          docker run --rm --network none --add-host reddit-api:127.0.0.1 --add-host api:127.0.0.1 --entrypoint nginx "$image" -t
+      - name: Scan the actual deployment image
+        if: steps.artifact.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table "fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+      - name: Deploy the built image and verify public HTML
+        if: >-
+          github.server_url == 'https://git.subcult.tv' &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          REUSE_ARTIFACT: ${{ steps.artifact.outputs.available }}
+          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          umask 077
+          deploy_dir=$(mktemp -d)
+          trap 'rm -rf "$deploy_dir"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
+          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
+            -o ConnectTimeout=15 onnwee@10.0.0.200)
+          ssh "${ssh_args[@]}" status
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          # The forced receiver accepts a full hexadecimal revision; expand it here.
+          if [[ "$REUSE_ARTIFACT" != true ]]; then
+            # shellcheck disable=SC2029
+            docker save "$image" | ssh "${ssh_args[@]}" "receive $DEPLOY_REVISION clustr-frontend"
+          fi
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "deploy $DEPLOY_REVISION"
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$deploy_dir/artifact.json"
+          expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_sha256"])' "$deploy_dir/artifact.json")
+          curl --fail --silent --show-error --retry 4 --retry-all-errors \
+            --max-time 30 https://clustr.subcult.tv/ > "$deploy_dir/live.html"
+          actual=$(sha256sum "$deploy_dir/live.html" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+          printf 'Live HTML matches the image built from %s\n' "$DEPLOY_REVISION"

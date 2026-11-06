@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -10,10 +11,12 @@ import (
 
 // TestNewService verifies service creation
 func TestNewService(t *testing.T) {
-	// Use a mock or skip if no test database
-	t.Skip("Skipping integration test - requires database")
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
 
-	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
@@ -33,9 +36,12 @@ func TestNewService(t *testing.T) {
 
 // TestCheckAllIntegrity verifies check execution
 func TestCheckAllIntegrity(t *testing.T) {
-	t.Skip("Skipping integration test - requires database")
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
 
-	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}

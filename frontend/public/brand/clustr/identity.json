@@ -1,0 +1,26 @@
+{
+  "slug": "clustr",
+  "origin": "https://clustr.subcult.tv",
+  "tags": [
+    "<link rel=\"icon\" href=\"/brand/clustr/favicon.ico\" sizes=\"16x16 32x32 48x48\">",
+    "<link rel=\"icon\" href=\"/brand/clustr/favicon.svg\" type=\"image/svg+xml\">",
+    "<link rel=\"apple-touch-icon\" href=\"/brand/clustr/apple-touch-icon.png\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta property=\"og:site_name\" content=\"Clustr\">",
+    "<meta property=\"og:title\" content=\"Clustr\">",
+    "<meta property=\"og:description\" content=\"Explore relationships between online communities as an interactive network.\">",
+    "<meta property=\"og:image\" content=\"https://clustr.subcult.tv/brand/clustr/og.png\">",
+    "<meta property=\"og:image:width\" content=\"1200\">",
+    "<meta property=\"og:image:height\" content=\"630\">",
+    "<meta property=\"og:image:alt\" content=\"Clustr \u2014 Explore relationships between online communities as an interactive network.\">",
+    "<meta name=\"twitter:card\" content=\"summary_large_image\">",
+    "<meta name=\"twitter:title\" content=\"Clustr\">",
+    "<meta name=\"twitter:description\" content=\"Explore relationships between online communities as an interactive network.\">",
+    "<meta name=\"twitter:image\" content=\"https://clustr.subcult.tv/brand/clustr/og.png\">",
+    "<meta name=\"twitter:image:alt\" content=\"Clustr \u2014 Explore relationships between online communities as an interactive network.\">",
+    "<link rel=\"canonical\" href=\"https://clustr.subcult.tv/\">",
+    "<meta property=\"og:url\" content=\"https://clustr.subcult.tv/\">"
+  ],
+  "credit": "<footer class=\"subcult-identity\" aria-label=\"Software identity\"><img src=\"/brand/clustr/mark.svg\" width=\"32\" height=\"32\" alt=\"\"><span>Clustr <span aria-hidden=\"true\">\u00b7</span> <a href=\"https://subcult.tv\">A SUBCULT project</a></span></footer>",
+  "css": ".subcult-identity{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin:0;padding:16px 24px;background:#030506;color:#e1ede8;font:14px/1.5 system-ui,sans-serif;text-align:center}.subcult-identity img{display:block;flex:none}.subcult-identity a{color:inherit;display:inline-flex;align-items:center;min-height:44px;text-underline-offset:3px}.subcult-identity a:focus-visible{outline:2px solid currentColor;outline-offset:4px}"
+}

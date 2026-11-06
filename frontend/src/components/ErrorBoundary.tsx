@@ -69,7 +69,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
           <div className="bg-red-900/20 border border-red-500/50 rounded-lg px-8 py-6 max-w-2xl mx-4">
             <div className="flex items-start gap-4">
               {/* Error icon */}
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 <svg
                   className="w-8 h-8 text-red-500"
                   fill="none"
@@ -99,7 +99,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                   <summary className="text-red-300 text-sm cursor-pointer hover:text-red-200">
                     Show error details
                   </summary>
-                  <pre className="mt-2 text-xs text-red-200 bg-black/30 rounded p-3 overflow-auto max-h-40">
+                  <pre className="mt-2 text-xs text-red-200 bg-black/30 rounded-sm p-3 overflow-auto max-h-40">
                     {this.state.error.toString()}
                     {this.state.error.stack && `\n\n${this.state.error.stack}`}
                   </pre>
@@ -109,13 +109,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 <div className="flex gap-3">
                   <button
                     onClick={this.handleReset}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-sm font-medium transition-colors"
                   >
                     Try Again
                   </button>
                   <button
                     onClick={() => window.location.reload()}
-                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-medium transition-colors"
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-sm font-medium transition-colors"
                   >
                     Reload Page
                   </button>

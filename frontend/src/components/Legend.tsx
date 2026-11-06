@@ -46,7 +46,7 @@ export default function Legend({ filters, useCommunityColors, communityCount }: 
           {visibleTypes.map((type) => (
             <div key={type.key} className="flex items-center gap-2 text-xs" role="listitem">
               <div
-                className="w-3 h-3 rounded"
+                className="w-3 h-3 rounded-sm"
                 style={{ backgroundColor: type.color }}
                 aria-hidden="true"
               />
@@ -60,7 +60,7 @@ export default function Legend({ filters, useCommunityColors, communityCount }: 
       {useCommunityColors && (
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-xs">
-            <div className="w-3 h-3 rounded bg-gradient-to-r from-red-500 via-blue-500 to-green-500" aria-hidden="true" />
+            <div className="w-3 h-3 rounded-sm bg-linear-to-r from-red-500 via-blue-500 to-green-500" aria-hidden="true" />
             <span>{communityCount ? `${communityCount} loaded groups` : "Macro-group hue"}</span>
           </div>
           <div className="mt-1 text-xs text-[#9aaba8]">

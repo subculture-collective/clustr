@@ -26,7 +26,7 @@ const GraphErrorFallback = ({
       <div className="instrument-panel mx-4 max-w-2xl rounded-2xl border-red-500/30 px-8 py-6">
         <div className="flex items-start gap-4">
           {/* Error icon */}
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <svg
               className="w-8 h-8 text-red-500"
               fill="none"
@@ -75,7 +75,7 @@ const GraphErrorFallback = ({
               <summary className="text-red-300 text-sm cursor-pointer hover:text-red-200">
                 Show technical details
               </summary>
-              <pre className="mt-2 text-xs text-red-200 bg-black/30 rounded p-3 overflow-auto max-h-40">
+              <pre className="mt-2 text-xs text-red-200 bg-black/30 rounded-sm p-3 overflow-auto max-h-40">
                 {error.toString()}
                 {error.stack && `\n\n${error.stack}`}
               </pre>

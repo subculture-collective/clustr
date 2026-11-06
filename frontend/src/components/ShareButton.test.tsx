@@ -48,7 +48,7 @@ describe('ShareButton', () => {
   it('renders with appropriate styling', () => {
     render(<ShareButton getState={mockGetState} />);
     const button = screen.getByText(/Share Link/);
-    expect(button).toHaveClass('px-3', 'py-2', 'rounded');
+    expect(button).toHaveClass('px-3', 'py-2', 'rounded-sm');
   });
 
   it('has accessible title attribute', () => {

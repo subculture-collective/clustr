@@ -114,7 +114,7 @@ export default function Catalog({ onLocate }: Props) {
   function selectItem(item: CatalogItem) { setSelected(item.id); setMobilePanel('detail'); syncURL({ selected: item.id }, true); }
   function openTree(id: string) { setTreeRoot(id); setMode('tree'); setMobilePanel('results'); syncURL({ mode: 'tree', treeRoot: id }, true); }
 
-  return <div className="catalog-shell mx-auto w-full max-w-[96rem] px-3 md:px-6">
+  return <div className="catalog-shell mx-auto w-full max-w-384 px-3 md:px-6">
     <header className="mb-5 flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="instrument-label">Public archive / revision pinned</p><h1 className="mt-3 text-3xl font-semibold text-white">Catalog</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aaba8]">Search and traverse every published subreddit, person, post, and comment without entering the map.</p></div>
       <div className="flex rounded-full border border-white/10 p-1" role="tablist" aria-label="Catalog modes">
@@ -151,7 +151,7 @@ export default function Catalog({ onLocate }: Props) {
       </section>
 
       <aside className="instrument-panel catalog-detail rounded-2xl p-5" aria-label="Entity detail" data-mobile-panel="detail" data-mobile-active={mobilePanel==='detail'}>
-        {selectedItem ? <><p className="instrument-label">{selectedItem.type} / {selectedItem.id}</p><h2 className="mt-3 break-words text-xl font-semibold text-white">{selectedItem.title || selectedItem.label}</h2>
+        {selectedItem ? <><p className="instrument-label">{selectedItem.type} / {selectedItem.id}</p><h2 className="mt-3 wrap-break-word text-xl font-semibold text-white">{selectedItem.title || selectedItem.label}</h2>
           <div className="mt-4 flex flex-wrap gap-2"><button className="instrument-button min-h-11 rounded-full border border-white/10 px-4 text-xs" onClick={() => onLocate(selectedItem.id)}>Locate in Universe</button><button className="instrument-button min-h-11 rounded-full border border-white/10 px-4 text-xs" onClick={() => openTree(selectedItem.id)}>Open tree</button><button className="instrument-button min-h-11 rounded-full border border-white/10 px-4 text-xs" onClick={() => navigator.clipboard.writeText(`${location.origin}/catalog/${selectedItem.type}s/${encodeURIComponent(selectedItem.id)}`)}>Copy link</button></div>
           {selectedItem.sensitive ? <div className="mt-5 rounded-xl border border-amber-300/30 bg-amber-300/5 p-4"><p className="font-mono text-xs text-amber-200">SENSITIVE CONTENT · COLLAPSED</p><p className="mt-2 text-xs leading-5 text-[#c3c8c5]">Source or administrative sensitivity flags apply. Metadata remains visible.</p><button className="instrument-button mt-3 min-h-11 rounded-lg border border-amber-200/20 px-4 text-xs" aria-expanded={!!sensitiveOpen[selectedItem.id]} onClick={() => setSensitiveOpen(open => ({...open,[selectedItem.id]:!open[selectedItem.id]}))}>{sensitiveOpen[selectedItem.id] ? 'Collapse text' : 'Show text'}</button></div> : null}
           {(!selectedItem.sensitive || sensitiveOpen[selectedItem.id]) && <div className="mt-5 space-y-4 text-sm leading-6 text-[#d6e0dd]">{selectedItem.description && <p className="whitespace-pre-wrap">{selectedItem.description}</p>}{selectedItem.body && <p className="whitespace-pre-wrap">{selectedItem.body}</p>}</div>}

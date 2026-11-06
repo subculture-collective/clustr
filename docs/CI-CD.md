@@ -216,3 +216,20 @@ Where `PAT` is a Personal Access Token with `read:packages` scope.
 - Add SBOM generation
 - Add automated dependency updates (Dependabot/Renovate)
 - Add deployment workflows for staging/production environments
+
+## Historical secret findings
+
+Manual CI dispatch runs the existing full-history Gitleaks scan. Its first run
+found ten historical items: eight mask/auth test and documentation examples,
+and two references to an old database password in the initial Compose/Makefile.
+The old password is absent from the current clustr API/crawler and selected
+running database environments; a read-only authentication attempt against the
+active clustr database rejected it on November 5, 2026. The current source no
+longer contains that password. Private operational evidence remains with the
+CI deployment rollout receipts; do not copy credential values into this note.
+
+`.gitleaksignore` records only the exact commit/path/rule/line fingerprints of
+these ten reviewed findings. It adds no rule, path or value-wide allowlist, and
+the scan still examines the full history. A separate positive-control scan with
+a new synthetic credential in the same test path confirms that new findings
+remain blocking. Source pushes and pull requests keep their changed-commit scan.

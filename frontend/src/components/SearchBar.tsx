@@ -308,11 +308,11 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
                   isSelected ? 'bg-white/[.08]' : 'hover:bg-white/[.04]'
                 }`}
               >
-                <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold text-[#030506] ${getNodeColor(result.type)}`}>{getNodeIcon(result.type)}</div>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold text-[#030506] ${getNodeColor(result.type)}`}>{getNodeIcon(result.type)}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium text-white">{result.name}</span>
-                    <span className="instrument-label flex-shrink-0">
+                    <span className="instrument-label shrink-0">
                       {result.type || 'unknown'}
                     </span>
                   </div>
@@ -327,7 +327,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({ onSelectNode, c
                   </div>
                 </div>
                 {isSelected && (
-                  <div className="flex-shrink-0 font-mono text-xs text-[#b6ff62]">ENTER</div>
+                  <div className="shrink-0 font-mono text-xs text-[#b6ff62]">ENTER</div>
                 )}
               </button>
             );

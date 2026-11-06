@@ -77,7 +77,7 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-9999 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -135,7 +135,7 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
                       <span className="text-[#c7d2cf]">
                         {shortcut.description}
                       </span>
-                      <kbd className="inline-flex items-center gap-1 rounded border border-white/15 bg-white/5 px-2 py-1 font-mono text-xs font-semibold text-white">
+                      <kbd className="inline-flex items-center gap-1 rounded-sm border border-white/15 bg-white/5 px-2 py-1 font-mono text-xs font-semibold text-white">
                         {formatShortcut(shortcut)}
                       </kbd>
                     </div>
@@ -147,10 +147,10 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
         </div>
 
         {/* Footer */}
-        <div className="border-t border-white/10 bg-white/[.02] px-6 py-3">
+        <div className="border-t border-white/10 bg-white/2 px-6 py-3">
           <p className="text-center text-sm text-[#9aaba8]">
-            Press <kbd className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">Esc</kbd> or{' '}
-            <kbd className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs">?</kbd> to close
+            Press <kbd className="rounded-sm bg-white/5 px-1.5 py-0.5 font-mono text-xs">Esc</kbd> or{' '}
+            <kbd className="rounded-sm bg-white/5 px-1.5 py-0.5 font-mono text-xs">?</kbd> to close
           </p>
         </div>
       </div>

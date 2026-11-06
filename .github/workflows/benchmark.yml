@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch: # Allow manual trigger
 
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     name: Run Performance Benchmarks
@@ -20,7 +23,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -124,6 +127,7 @@ jobs:
   # Store baseline on main branch
   store-baseline:
     name: Store Baseline
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: benchmark
