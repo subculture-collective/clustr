@@ -877,10 +877,13 @@ func (h *RevisionHandler) Community(w http.ResponseWriter, r *http.Request) {
 	useCatalog := catalog.Valid
 	if useCatalog {
 		var hasMembers bool
-		err = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
-SELECT 1 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND community_id=$2
+		// Check for members of the same types the node query returns. The type
+		// filter also lets PostgreSQL use the partial community index; without
+		// it a community absent from the catalog scanned the whole entity table.
+		err = h.db.QueryRowContext(r.Context(), fmt.Sprintf(`SELECT EXISTS(
+SELECT 1 FROM spatial_catalog_entities e WHERE catalog_id=$1 AND community_id=$2 AND %s
 AND NOT EXISTS (SELECT 1 FROM public_entity_suppressions s WHERE s.entity_id=e.id AND s.restored_at IS NULL)
-)`, catalog.Int64, cid).Scan(&hasMembers)
+)`, typeFilter), catalog.Int64, cid).Scan(&hasMembers)
 		if err != nil {
 			writeRevisionError(w, err)
 			return
