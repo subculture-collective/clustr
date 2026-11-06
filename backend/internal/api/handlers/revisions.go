@@ -792,18 +792,22 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
  FROM visible source
  JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=source.id
  JOIN visible target ON target.id=link.target
+), owned AS MATERIALIZED (
+ -- Read the visible entities once; each structural relation filters them.
+ SELECT id,type,parent_id,anchor_id,author_id
+ FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2)
 ), structural AS (
  SELECT author_id source,id target,'authorship' relation,true directed,1::bigint weight
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND author_id=ANY($2)
+ FROM owned WHERE author_id=ANY($2)
  UNION ALL
  SELECT id,parent_id,'published_in',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='post' AND parent_id=ANY($2)
+ FROM owned WHERE type='post' AND parent_id=ANY($2)
  UNION ALL
  SELECT id,anchor_id,'comment_on',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='comment' AND anchor_id=ANY($2)
+ FROM owned WHERE type='comment' AND anchor_id=ANY($2)
  UNION ALL
  SELECT parent_id,id,'reply',true,1::bigint
- FROM spatial_catalog_entities WHERE catalog_id=$1 AND id=ANY($2) AND type='comment' AND parent_id LIKE 'comment_%' AND parent_id=ANY($2)
+ FROM owned WHERE type='comment' AND parent_id LIKE 'comment_%' AND parent_id=ANY($2)
 )
 SELECT source,target,relation,directed,weight FROM (
  SELECT * FROM materialized UNION ALL SELECT * FROM structural
