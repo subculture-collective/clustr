@@ -180,6 +180,18 @@ RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
 	}
 	mark("setup")
 
+	// The referenced catalog owns every coordinate. When it was placed under
+	// a new rule, landmarks move to their members instead of keeping the
+	// previous revision's positions.
+	var catalogID int64
+	if err = tx.QueryRowContext(ctx, `SELECT spatial_catalog_id FROM graph_revisions WHERE id=$1`, id).Scan(&catalogID); err != nil {
+		return failTx("catalog_reference", err)
+	}
+	placementChanged, err := catalogPlacementChanged(ctx, tx, catalogID)
+	if err != nil {
+		return failTx("placement_mode", err)
+	}
+
 	// Match both sides' best weighted membership overlap. Mutual-best matching
 	// prevents one old landmark from being assigned to both sides of a split.
 	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE revision_community_map ON COMMIT DROP AS
@@ -211,10 +223,12 @@ LEFT JOIN graph_revision_communities old ON old.revision_id=p.revision_id AND ol
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_communities(revision_id,community_id,parent_id,level,label,size,x,y,z)
 SELECT $1,m.stable_id,NULL,0,c.label,c.size,
- COALESCE(m.old_x,((hashtext(m.stable_id)::bigint % 20000)-10000)/10.0),
- COALESCE(m.old_y,((hashtext(m.stable_id||':y')::bigint % 20000)-10000)/10.0),
- COALESCE(m.old_z,((hashtext(m.stable_id||':z')::bigint % 20000)-10000)/10.0)
-FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id`, id)
+ COALESCE(CASE WHEN NOT $3 THEN m.old_x END,centroid.x,((hashtext(m.stable_id)::bigint % 20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $3 THEN m.old_y END,centroid.y,((hashtext(m.stable_id||':y')::bigint % 20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $3 THEN m.old_z END,centroid.z,((hashtext(m.stable_id||':z')::bigint % 20000)-10000)/10.0)
+FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id
+LEFT JOIN LATERAL (SELECT avg(e.x) x,avg(e.y) y,avg(e.z) z FROM graph_community_members gm
+ JOIN spatial_catalog_entities e ON e.catalog_id=$2 AND e.id=gm.node_id WHERE gm.community_id=c.id) centroid ON true`, id, catalogID, placementChanged)
 	if err != nil {
 		return failTx("community_landmarks", err)
 	}
@@ -278,18 +292,19 @@ WHERE c.revision_id=$1 AND labels.stable_id=c.community_id`, id)
 )
 INSERT INTO graph_revision_nodes(revision_id,id,name,value,type,x,y,z,position_provenance)
 SELECT $1,n.id,n.name,CASE WHEN n.val ~ '^[0-9]+$' THEN n.val::bigint ELSE 0 END,COALESCE(n.type,'unknown'),
- COALESCE(old.x,landmark.x + ((hashtext(n.id)::bigint % 2000)-1000)/100.0,n.pos_x,((hashtext(n.id)::bigint % 20000)-10000)/10.0),
- COALESCE(old.y,landmark.y + ((hashtext(n.id||':y')::bigint % 2000)-1000)/100.0,n.pos_y,((hashtext(n.id||':y')::bigint % 20000)-10000)/10.0),
- COALESCE(old.z,landmark.z + ((hashtext(n.id||':z')::bigint % 2000)-1000)/100.0,
+ COALESCE(catalog.x,old.x,landmark.x + ((hashtext(n.id)::bigint % 2000)-1000)/100.0,n.pos_x,((hashtext(n.id)::bigint % 20000)-10000)/10.0),
+ COALESCE(catalog.y,old.y,landmark.y + ((hashtext(n.id||':y')::bigint % 2000)-1000)/100.0,n.pos_y,((hashtext(n.id||':y')::bigint % 20000)-10000)/10.0),
+ COALESCE(catalog.z,old.z,landmark.z + ((hashtext(n.id||':z')::bigint % 2000)-1000)/100.0,
           CASE WHEN abs(COALESCE(n.pos_z,0)) > 0.000001 THEN n.pos_z END,
           ((hashtext(n.id||':z')::bigint % 20000)-10000)/10.0),
- CASE WHEN old.id IS NOT NULL THEN 'warm-start' WHEN landmark.community_id IS NOT NULL THEN 'community-seeded' ELSE 'deterministic-global' END
+ CASE WHEN catalog.id IS NOT NULL THEN 'catalog-placed' WHEN old.id IS NOT NULL THEN 'warm-start' WHEN landmark.community_id IS NOT NULL THEN 'community-seeded' ELSE 'deterministic-global' END
 FROM capped_nodes n
+LEFT JOIN spatial_catalog_entities catalog ON catalog.catalog_id=$7 AND catalog.id=n.id
 LEFT JOIN graph_revision_current current ON current.singleton
 LEFT JOIN graph_revision_nodes old ON old.revision_id=current.revision_id AND old.id=n.id
 LEFT JOIN LATERAL (SELECT map.stable_id FROM graph_community_members gm JOIN revision_community_map map ON map.legacy_id=gm.community_id WHERE gm.node_id=n.id ORDER BY map.stable_id LIMIT 1) member ON true
 LEFT JOIN graph_revision_communities landmark ON landmark.revision_id=$1 AND landmark.community_id=member.stable_id`,
-		id, options.NodeCap, options.SubredditCap, options.UserCap, options.PostCap, options.CommentCap)
+		id, options.NodeCap, options.SubredditCap, options.UserCap, options.PostCap, options.CommentCap, catalogID)
 	if err != nil {
 		return failTx("spatial_layout", err)
 	}
