@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "usage: $0 ENV_FILE [graph-revision|catalog-rebuild|catalog-preflight]" >&2
+  echo "usage: $0 ENV_FILE [graph-revision|catalog-rebuild|catalog-publish|catalog-preflight]" >&2
   exit 64
 fi
 
@@ -16,7 +16,7 @@ if [[ ${mode} == "--initial-full" ]]; then
   echo "legacy mode is no longer supported: ${mode}" >&2
   exit 64
 fi
-if [[ ${mode} != "graph-revision" && ${mode} != "catalog-rebuild" && ${mode} != "catalog-preflight" ]]; then
+if [[ ${mode} != "graph-revision" && ${mode} != "catalog-rebuild" && ${mode} != "catalog-publish" && ${mode} != "catalog-preflight" ]]; then
   echo "unknown mode: ${mode}" >&2
   exit 64
 fi
@@ -79,6 +79,13 @@ if [[ ${mode} == "graph-revision" ]]; then
 elif [[ ${mode} == "catalog-rebuild" ]]; then
   worker_args=(--once --full --full-catalog)
   graph_behavior=full
+  catalog_behavior=rebuild
+elif [[ ${mode} == "catalog-publish" ]]; then
+  # Rebuild and publish the catalog from the existing graph workspace, then
+  # publish the revision that references it. This is how a placement-rule
+  # change reaches production without recomputing the workspace.
+  worker_args=(--once --publish-only --full-catalog)
+  graph_behavior=existing
   catalog_behavior=rebuild
 else
   worker_args=()
