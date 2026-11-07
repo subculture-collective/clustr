@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Text, configureTextBuilder } from 'troika-three-text';
+import { BatchedText, Text, configureTextBuilder } from 'troika-three-text';
 
 // Clustr serves a bounded local font and CSP intentionally disallows Troika's
 // worker/bootstrap path. Configure this before the first glyph request.
@@ -13,7 +13,9 @@ configureTextBuilder({ useWorker: false });
  *
  * Key features:
  * - Single texture atlas shared across all labels
- * - 1-2 draw calls for all labels (vs 200 textures with SpriteText)
+ * - Every label is a member of one troika BatchedText, so all labels cost
+ *   two draw calls per frame (outline pass and fill pass) instead of two
+ *   draw calls per label
  * - Crisp text at all zoom levels (SDF advantage)
  * - Billboard orientation (always faces camera)
  * - LOD integration with frustum culling
@@ -100,6 +102,8 @@ export function renderableSpatialLabel(value: string, maxLength = 28): string {
 export class SDFTextRenderer {
   private scene: THREE.Scene;
   private group: THREE.Group;
+  /** Draws every label in one batch; member Text objects only carry layout. */
+  private batch: BatchedText;
   private textObjects: Map<string, TextObject> = new Map();
   private maxLabels: number;
   private fontSize: number;
@@ -111,6 +115,9 @@ export class SDFTextRenderer {
   private readonly onSync: (() => void) | undefined;
   /** Screen height, in CSS pixels, of a label with size 1. */
   private static readonly BASE_SCREEN_HEIGHT_PX = 12;
+  // Keep label rendering deterministic and available offline. Troika's
+  // network default font made the scene depend on a third-party CDN.
+  private static readonly FONT_URL = '/fonts/NotoSans-Latin.woff';
 
   constructor(scene: THREE.Scene, config: SDFTextRendererConfig = {}) {
     this.scene = scene;
@@ -123,6 +130,19 @@ export class SDFTextRenderer {
     // Create group to hold all text objects
     this.group = new THREE.Group();
     this.scene.add(this.group);
+
+    // One batch renders every member label. The batch's material applies to
+    // all members; per-label colour, outline and transform are packed into a
+    // data texture by troika.
+    this.batch = new BatchedText();
+    this.batch.font = SDFTextRenderer.FONT_URL;
+    this.batch.material.depthTest = true;
+    this.batch.material.depthWrite = false;
+    this.batch.material.transparent = true;
+    // An empty batch must not be drawn: troika sizes its data texture from
+    // the member count, and zero members gives it no valid size.
+    this.batch.visible = false;
+    this.group.add(this.batch);
   }
 
   /**
@@ -137,7 +157,7 @@ export class SDFTextRenderer {
     const newIds = new Set(limitedLabels.map((l) => l.id));
     for (const [id, textObj] of this.textObjects) {
       if (!newIds.has(id)) {
-        this.group.remove(textObj.text);
+        this.batch.remove(textObj.text);
         textObj.text.dispose();
         this.textObjects.delete(id);
       }
@@ -153,9 +173,7 @@ export class SDFTextRenderer {
         
         // Configure text appearance
         text.text = renderableSpatialLabel(label.text);
-        // Keep label rendering deterministic and available offline. Troika's
-        // network default font made the scene depend on a third-party CDN.
-        (text as Text & { font: string }).font = '/fonts/NotoSans-Latin.woff';
+        text.font = SDFTextRenderer.FONT_URL;
         text.fontSize = this.fontSize * (label.size || 1);
         text.color = this.color;
         text.anchorX = 'center';
@@ -168,18 +186,14 @@ export class SDFTextRenderer {
         text.outlineColor = this.backgroundColor;
         text.outlineOpacity = 0.35;
 
-        // Billboard orientation - always face camera
-        text.material.depthTest = true;
-        text.material.depthWrite = false;
-        text.material.transparent = true;
-
         // Set position
         if (label.position) {
           text.position.set(label.position.x, label.position.y, label.position.z);
         }
 
-        // Add to scene
-        this.group.add(text);
+        // Join the batch. The member is not a scene child; the batch packs
+        // its layout and local matrix on every drawn frame.
+        this.batch.add(text);
 
         textObj = {
           text,
@@ -209,11 +223,12 @@ export class SDFTextRenderer {
         textObj.priority = label.priority ?? 0;
         textObj.alwaysVisible = label.alwaysVisible ?? false;
       }
-
-      // Trigger text sync (troika batches updates) and ask for a frame once
-      // the glyphs exist.
-      textObj.text.sync(this.onSync);
     }
+
+    // Lay out the changed members and repack the batch, then ask for a frame
+    // once the glyphs exist.
+    this.batch.visible = this.textObjects.size > 0;
+    this.batch.sync(this.onSync);
   }
 
   /**
@@ -278,7 +293,10 @@ export class SDFTextRenderer {
       }
       
       if (textObj.visible !== shouldBeVisible) {
-        textObj.text.visible = shouldBeVisible;
+        // A batch member has no visibility of its own; collapsing its
+        // transform draws nothing without repacking the batch.
+        // updateBillboard restores the scale of visible members.
+        if (!shouldBeVisible) textObj.text.scale.setScalar(0);
         textObj.visible = shouldBeVisible;
       }
     }
@@ -342,10 +360,12 @@ export class SDFTextRenderer {
    */
   dispose(): void {
     for (const textObj of this.textObjects.values()) {
-      this.group.remove(textObj.text);
+      this.batch.remove(textObj.text);
       textObj.text.dispose();
     }
     this.textObjects.clear();
+    this.group.remove(this.batch);
+    this.batch.dispose();
     this.scene.remove(this.group);
   }
 }
