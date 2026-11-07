@@ -45,3 +45,19 @@ func TestConcurrentIndexMigrationRunsOutsideTransaction(t *testing.T) {
 		t.Fatal("ordinary index migration must remain transactional")
 	}
 }
+
+// Deployed services refuse to start until CurrentMigration is applied, so it
+// must name the newest migration or a release can run against a schema that
+// lacks its own indexes or columns.
+func TestCurrentMigrationIsNewestFile(t *testing.T) {
+	files, err := migrationFiles(filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no migration files found")
+	}
+	if newest := files[len(files)-1]; newest != CurrentMigration {
+		t.Fatalf("CurrentMigration = %s, newest migration file is %s", CurrentMigration, newest)
+	}
+}

@@ -20,7 +20,7 @@ const (
 	advisoryLockID = int64(0x434c55535452) // "CLUSTR"
 )
 
-const CurrentMigration = "000040_weighted_link_indexes.up.sql"
+const CurrentMigration = "000042_drop_superseded_source_index.up.sql"
 
 // VerifyCurrent fails closed when a service is launched without the documented
 // migration runner having applied the schema it was compiled against.
