@@ -226,7 +226,8 @@ func (r Runner) apply(ctx context.Context, name string) error {
 }
 
 func requiresNoTransaction(body []byte) bool {
-	return strings.Contains(strings.ToUpper(string(body)), "CREATE INDEX CONCURRENTLY")
+	upper := strings.ToUpper(string(body))
+	return strings.Contains(upper, "CREATE INDEX CONCURRENTLY") || strings.Contains(upper, "DROP INDEX CONCURRENTLY")
 }
 
 func (r Runner) verifyChecksum(ctx context.Context, name, expected string) error {
