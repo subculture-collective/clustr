@@ -223,63 +223,37 @@ describe('LinkRenderer', () => {
         });
     });
 
-    describe('updateVisibility', () => {
-        it('should filter links based on camera frustum', () => {
+    describe('buffering', () => {
+        it('buffers every positioned link, including ones far from the origin', () => {
             const links = [
                 { source: 'node1', target: 'node2' },
                 { source: 'node3', target: 'node4' },
+                { source: 'node1', target: 'node4' },
             ];
             renderer.setLinks(links);
 
-            const positions = new Map([
+            renderer.updatePositions(new Map([
                 ['node1', { x: 0, y: 0, z: 0 }],
                 ['node2', { x: 10, y: 10, z: 10 }],
-                ['node3', { x: 1000, y: 1000, z: 1000 }], // Far away
-                ['node4', { x: 1010, y: 1010, z: 1010 }],
-            ]);
-
-            renderer.updatePositions(positions);
-
-            const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-            camera.position.set(0, 0, 100);
-            camera.lookAt(0, 0, 0);
-            camera.updateProjectionMatrix();
-
-            renderer.updateVisibility(camera);
+                ['node3', { x: 100000, y: 100000, z: 100000 }],
+                ['node4', { x: 100010, y: 100010, z: 100010 }],
+            ]));
             renderer.refresh();
 
             const stats = renderer.getStats();
-            // Far away links should be filtered out
-            expect(stats.bufferedLinks).toBeLessThan(2);
+            // The GPU clips off-screen geometry; nothing is dropped on the CPU
+            // for being far away or for having one endpoint out of view.
+            expect(stats.bufferedLinks).toBe(3);
+            expect(stats.visibleLinks).toBe(3);
         });
 
-        it('should skip update if camera moved insignificantly', () => {
-            const links = [{ source: 'node1', target: 'node2' }];
-            renderer.setLinks(links);
-
-            const positions = new Map([
-                ['node1', { x: 0, y: 0, z: 0 }],
-                ['node2', { x: 10, y: 10, z: 10 }],
-            ]);
-            renderer.updatePositions(positions);
-
-            const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-            camera.position.set(0, 0, 100);
-            camera.updateProjectionMatrix();
-
-            // First update
-            renderer.updateVisibility(camera);
-            renderer.refresh();
-
-            // Move camera slightly (less than threshold)
-            camera.position.set(0, 0, 101);
-            camera.updateProjectionMatrix();
-
-            // Second update should be skipped
-            renderer.updateVisibility(camera);
-
-            const stats = renderer.getStats();
-            expect(stats).toBeDefined();
+        it('submits the line object without bounding-sphere culling', () => {
+            const lines = scene.children.find(child => child instanceof THREE.LineSegments);
+            expect(lines).toBeDefined();
+            // Three computes the bounding sphere from the empty buffer on the
+            // first draw. With culling on, every link disappeared whenever the
+            // world origin left the view.
+            expect(lines!.frustumCulled).toBe(false);
         });
     });
 

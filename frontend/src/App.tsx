@@ -64,6 +64,9 @@ function App() {
   const [focusNodeId, setFocusNodeId] = useState<string | undefined>();
   const [showLabels, setShowLabels] = useState(true);
   const [selectedId, setSelectedId] = useState<string | undefined>();
+  // The display name of the selection when the view that selected it knows
+  // one; ids such as c:new:<hash> have no readable form.
+  const [selectedName, setSelectedName] = useState<string | undefined>();
   const [subredditSize, setSubredditSize] = useState<
     "subscribers" | "activeUsers" | "contentActivity" | "interSubLinks"
   >("subscribers");
@@ -144,6 +147,23 @@ function App() {
   // Ref for search bar to enable focus from keyboard shortcuts
   const searchInputRef = useRef<SearchBarHandle | null>(null);
   const closeFieldGuide = useCallback(() => setShowFieldGuide(false), []);
+  // Stable identities: the graph views bind pointer listeners against these.
+  const selectNode = useCallback((id?: string, name?: string) => {
+    setFocusNodeId(id);
+    setSelectedId(id);
+    setSelectedName(id ? name : undefined);
+  }, []);
+  const inspectNode = useCallback((id: string) => {
+    setFocusNodeId(id);
+    setSelectedId(id);
+    setExperienceMode("analyst");
+  }, []);
+  const clearSelection = useCallback(() => {
+    setSelectedId(undefined);
+    setFocusNodeId(undefined);
+    setSelectedName(undefined);
+  }, []);
+  const selectionLabel = selectedId ? selectedName || readableSelection(selectedId) : undefined;
 
   // Persist view mode
   useEffect(() => {
@@ -274,9 +294,8 @@ function App() {
         return;
       }
       // Otherwise deselect node
-      setSelectedId(undefined);
-      setFocusNodeId(undefined);
-    }, [showShortcutsHelp]),
+      clearSelection();
+    }, [showShortcutsHelp, clearSelection]),
     
     onShowHelp: useCallback(() => {
       setShowShortcutsHelp(prev => !prev);
@@ -298,7 +317,7 @@ function App() {
         className="sr-only"
         id="screen-reader-announcements"
       >
-        {selectedId ? `Selected ${readableSelection(selectedId)}.` : `Showing ${viewMode === "3d" ? "the three dimensional universe" : viewMode}.`}
+        {selectionLabel ? `Selected ${selectionLabel}.` : `Showing ${viewMode === "3d" ? "the three dimensional universe" : viewMode}.`}
       </div>
 
       <header className="pointer-events-none fixed inset-x-0 top-0 z-50 flex items-start justify-between gap-3 p-3 md:p-5">
@@ -340,9 +359,8 @@ function App() {
         <div className="fixed left-1/2 top-20 z-40 w-full max-w-xl -translate-x-1/2 px-3 md:top-5 md:max-w-md lg:max-w-xl">
           <SearchBar
             ref={searchInputRef}
-            onSelectNode={(id) => {
-              setFocusNodeId(id);
-              setSelectedId(id);
+            onSelectNode={(id, name) => {
+              selectNode(id, name);
               // Switch to 3D view if not already in a graph view
               if (viewMode === "dashboard") {
                 setViewMode("3d");
@@ -365,13 +383,10 @@ function App() {
             onViewMode={(mode: "3d" | "2d") => {
               setViewMode(mode);
             }}
-            onFocusNode={(id) => {
-              setFocusNodeId(id);
-              setSelectedId(id);
-            }}
+            onFocusNode={selectNode}
           /></section>
         ) : viewMode === "catalog" ? (
-          <section className="content-view catalog-content-view"><Catalog onLocate={(id) => { setFocusNodeId(id); setSelectedId(id); setViewMode("3d"); }} /></section>
+          <section className="content-view catalog-content-view"><Catalog onLocate={(id) => { selectNode(id); setViewMode("3d"); }} /></section>
         ) : viewMode === "communities" ? (
         <section className="content-view"><Communities
           onViewMode={(mode: "3d" | "2d") => {
@@ -453,15 +468,8 @@ function App() {
                 focusNodeId={focusNodeId}
                 showLabels={showLabels}
                 selectedId={selectedId}
-                onNodeSelect={(id?: string) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                }}
-                onInspectNode={(id) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                  setExperienceMode("analyst");
-                }}
+                onNodeSelect={selectNode}
+                onInspectNode={inspectNode}
                 communityResult={useCommunityColors ? communityResult : null}
                 usePrecomputedLayout={usePrecomputedLayout}
                 initialCamera={camera3dRef}
@@ -492,10 +500,7 @@ function App() {
                 focusNodeId={focusNodeId}
                 showLabels={showLabels}
                 selectedId={selectedId}
-                onNodeSelect={(id?: string) => {
-                  setFocusNodeId(id);
-                  setSelectedId(id);
-                }}
+                onNodeSelect={selectNode}
                 communityResult={useCommunityColors ? communityResult : null}
                 usePrecomputedLayout={usePrecomputedLayout}
                 initialCamera={camera2dRef}
@@ -509,15 +514,9 @@ function App() {
             communityCount={communityResult?.communities.length}
           />}
           {experienceMode === "analyst" && <Inspector
-            selected={selectedId ? { id: selectedId, name: readableSelection(selectedId) } : undefined}
-            onClear={() => {
-              setSelectedId(undefined);
-              setFocusNodeId(undefined);
-            }}
-            onFocus={(id) => {
-              setFocusNodeId(id);
-              setSelectedId(id);
-            }}
+            selected={selectedId && selectionLabel ? { id: selectedId, name: selectionLabel } : undefined}
+            onClear={clearSelection}
+            onFocus={selectNode}
           />}
         </>
         )}
@@ -535,9 +534,9 @@ function App() {
       {selectedId && experienceMode === "explore" && (viewMode === "3d" || viewMode === "2d") && (
         <aside className="instrument-panel fixed bottom-24 left-1/2 z-40 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-4 rounded-full py-2 pl-4 pr-2" aria-label="Selected object">
           <span className="signal-dot" aria-hidden="true" />
-          <div className="min-w-0"><p className="instrument-label">Attention lock</p><p className="max-w-48 truncate text-sm font-medium text-white">{readableSelection(selectedId)}</p></div>
+          <div className="min-w-0"><p className="instrument-label">Attention lock</p><p className="max-w-48 truncate text-sm font-medium text-white">{selectionLabel}</p></div>
           <button type="button" className="instrument-button rounded-full px-3 text-[11px] text-white" onClick={() => setExperienceMode("analyst")}>Inspect</button>
-          <button type="button" className="instrument-button rounded-full px-3 text-[11px]" aria-label="Clear selection" onClick={() => { setSelectedId(undefined); setFocusNodeId(undefined); }}>×</button>
+          <button type="button" className="instrument-button rounded-full px-3 text-[11px]" aria-label="Clear selection" onClick={clearSelection}>×</button>
         </aside>
       )}
       

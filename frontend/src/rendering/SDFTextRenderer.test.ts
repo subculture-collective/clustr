@@ -269,10 +269,29 @@ describe('SDFTextRenderer', () => {
       camera.updateMatrixWorld();
 
       renderer.updateBillboard(camera);
-      
+
       // Billboard update is applied
       const stats = renderer.getStats();
       expect(stats.totalLabels).toBe(1);
+    });
+
+    it('keeps a visible label the same height on screen at any distance', () => {
+      // fov 90 and a 1000 px viewport: one pixel spans 2 * distance / 1000 units.
+      const perspective = new THREE.PerspectiveCamera(90, 1, 0.1, 1e6);
+      renderer.setViewportHeight(1000);
+      const text = scene.children[0].children[0] as THREE.Object3D & { fontSize: number };
+
+      perspective.position.set(0, 0, 1000);
+      perspective.updateMatrixWorld();
+      renderer.updateVisibility(perspective, new Set(['node1']));
+      renderer.updateBillboard(perspective);
+      // A size-1 label is 12 px tall: 12 px * 2 units/px = 24 units, over fontSize 8.
+      expect(text.scale.x).toBeCloseTo(3, 5);
+
+      perspective.position.set(0, 0, 100000);
+      perspective.updateMatrixWorld();
+      renderer.updateBillboard(perspective);
+      expect(text.scale.x).toBeCloseTo(300, 3);
     });
   });
 

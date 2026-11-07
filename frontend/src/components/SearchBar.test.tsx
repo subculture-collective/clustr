@@ -144,7 +144,7 @@ describe('SearchBar', () => {
     const result = screen.getByText('askreddit');
     await user.click(result);
 
-    expect(mockOnSelectNode).toHaveBeenCalledWith('subreddit_1');
+    expect(mockOnSelectNode).toHaveBeenCalledWith('subreddit_1', 'askreddit');
   });
 
   it('allows keyboard navigation with arrow keys', async () => {
@@ -190,7 +190,7 @@ describe('SearchBar', () => {
     // Press Enter to select
     await user.keyboard('{Enter}');
 
-    expect(mockOnSelectNode).toHaveBeenCalledWith('user_1');
+    expect(mockOnSelectNode).toHaveBeenCalledWith('user_1', 'testuser');
   });
 
   it('closes dropdown on Escape key', async () => {
