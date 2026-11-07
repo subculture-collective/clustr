@@ -174,7 +174,12 @@ These are deliberate operator steps, not commands for unattended automation.
 The catalog preflight and rebuild units are static oneshots. They are never
 enabled and have no timer. Qualify `catalog-rebuild` separately on a fresh
 production clone; one hour, 4 GiB peak RSS, disk headroom, exact document
-coverage, orphan rejection, and pointer safety are hard gates.
+coverage, orphan rejection, and pointer safety are hard gates. The wrapper's
+`catalog-publish` mode rebuilds and publishes the catalog from the existing
+graph workspace (`--once --publish-only --full-catalog`) and then publishes the
+revision that references it; use it to roll out a placement-rule change (ADR
+0008) without recomputing the workspace, under the same gates and with the
+hourly timer disabled while it runs.
 
 ## Crawler cutover
 

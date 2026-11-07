@@ -130,6 +130,10 @@ assert_contains '/app/precalculate --once' "${tmp}/graph/docker.log"
 case_run catalog 0 catalog-rebuild
 assert_contains '/app/precalculate --once --full --full-catalog' "${tmp}/catalog/docker.log"
 assert_contains 'precalculation mode=catalog-rebuild graph=full catalog=rebuild' "${tmp}/catalog.err"
+case_run publish 0 catalog-publish
+assert_contains '/app/precalculate --once --publish-only --full-catalog' "${tmp}/publish/docker.log"
+assert_contains 'precalculation mode=catalog-publish graph=existing catalog=rebuild' "${tmp}/publish.err"
+assert_contains 'remote=df -B1 --output=avail' "${tmp}/publish/ssh.log"
 assert_contains 'remote=docker inspect --format' "${tmp}/catalog/ssh.log"
 assert_not_contains '\n' "${tmp}/catalog/ssh.log"
 assert_contains 'remote=df -B1 --output=avail' "${tmp}/catalog/ssh.log"
