@@ -22,14 +22,28 @@ type SpatialCatalogOptions struct {
 	ParallelWorkers int
 	KnownBotNames   []string
 	ShadowOnly      bool
+	// ColdPlacement forces a full relayout even when the current catalog was
+	// placed under the same rule; a rule version change forces one anyway.
+	ColdPlacement bool
+	// LayoutIterations is the simulation length of a cold relayout and
+	// WarmLayoutIterations the length used to settle new subreddits.
+	LayoutIterations     int
+	WarmLayoutIterations int
+	// WorldRadius is the distance from the origin inside which 95% of linked
+	// subreddits are placed by a cold relayout.
+	WorldRadius float64
 }
 
 func DefaultSpatialCatalogOptions() SpatialCatalogOptions {
 	return SpatialCatalogOptions{
-		Retention:       positiveEnv("SPATIAL_CATALOG_RETENTION", 2),
-		WorkMemMB:       positiveEnv("SPATIAL_CATALOG_WORK_MEM_MB", 256),
-		ParallelWorkers: nonNegativeEnv("SPATIAL_CATALOG_PARALLEL_WORKERS", 0),
-		KnownBotNames:   configuredBotNames(),
+		Retention:            positiveEnv("SPATIAL_CATALOG_RETENTION", 2),
+		WorkMemMB:            positiveEnv("SPATIAL_CATALOG_WORK_MEM_MB", 256),
+		ParallelWorkers:      nonNegativeEnv("SPATIAL_CATALOG_PARALLEL_WORKERS", 0),
+		KnownBotNames:        configuredBotNames(),
+		ColdPlacement:        boolEnv("SPATIAL_CATALOG_COLD_PLACEMENT"),
+		LayoutIterations:     positiveEnv("SPATIAL_CATALOG_LAYOUT_ITERATIONS", defaultCatalogLayoutIterations),
+		WarmLayoutIterations: positiveEnv("SPATIAL_CATALOG_WARM_LAYOUT_ITERATIONS", defaultCatalogWarmLayoutIterations),
+		WorldRadius:          floatEnv("SPATIAL_CATALOG_WORLD_RADIUS", defaultCatalogWorldRadius),
 	}
 }
 
@@ -63,8 +77,17 @@ func BuildSpatialCatalogWithOptions(ctx context.Context, database *sql.DB, water
 	if options.ParallelWorkers > 12 {
 		options.ParallelWorkers = 12
 	}
+	if options.LayoutIterations <= 0 {
+		options.LayoutIterations = defaultCatalogLayoutIterations
+	}
+	if options.WarmLayoutIterations <= 0 {
+		options.WarmLayoutIterations = defaultCatalogWarmLayoutIterations
+	}
+	if options.WorldRadius <= 0 {
+		options.WorldRadius = defaultCatalogWorldRadius
+	}
 	config, _ := json.Marshal(map[string]any{
-		"placement":        "anchored-semantic-3d-v1",
+		"placement":        catalogPlacementVersion,
 		"projection":       "full-corpus-typed-weighted-v1",
 		"labels":           "semantic-label-v1",
 		"bot_policy":       AutomationPolicyVersion,
@@ -234,29 +257,60 @@ FROM (
 		return failTx("related_subreddit_index", err)
 	}
 
-	// Existing entities never jump when a new catalog is built. New subreddits
-	// prefer the graph-revision seed, then their strongest seeded neighbor.
+	// Subreddits that share users are laid out by the force simulation, like
+	// a graph view: linked subreddits attract, everything repels, so each
+	// community gathers in its own region. A cold relayout moves every
+	// entity; a warm build pins placed subreddits and settles new ones.
+	cold := options.ColdPlacement
+	if !cold {
+		if cold, err = catalogPlacementIsCold(ctx, tx); err != nil {
+			return failTx("placement_mode", err)
+		}
+	}
+	layout, err := layoutCatalogSubreddits(ctx, tx, watermark, cold, options)
+	if err != nil {
+		return failTx("force_layout", err)
+	}
+	logger.InfoContext(ctx, "Spatial catalog subreddit layout complete", "catalog_id", catalogID, "mode", layout.Mode,
+		"bodies", layout.Bodies, "settled", layout.Settled, "isolated", layout.Isolated, "iterations", layout.Stats.Iterations,
+		"radius95", layout.Stats.Radius95, "mean_edge_length", layout.Stats.MeanEdgeLength)
+	layoutConfig, _ := json.Marshal(map[string]any{
+		"placement_mode": layout.Mode,
+		"layout": map[string]any{
+			"bodies": layout.Bodies, "edges": layout.Stats.Edges, "settled": layout.Settled, "isolated": layout.Isolated,
+			"iterations": layout.Stats.Iterations, "radius95": layout.Stats.Radius95, "mean_edge_length": layout.Stats.MeanEdgeLength,
+			"world_radius": options.WorldRadius,
+		},
+	})
+	if _, err = tx.ExecContext(ctx, `UPDATE spatial_catalogs SET config=config||$2::jsonb WHERE id=$1`, catalogID, string(layoutConfig)); err != nil {
+		return failTx("placement_config", err)
+	}
+
+	// In a warm build existing entities never jump. Every other subreddit
+	// takes its force-layout or shell position; the revision seed and the
+	// strongest neighbour remain as fallbacks for rows the layout did not see.
 	_, err = tx.ExecContext(ctx, `INSERT INTO spatial_catalog_entities(
 	catalog_id,id,label,type,value,x,y,z,parent_id,anchor_id,author_id,community_id,position_provenance,source_updated_at,metrics)
 SELECT $1,'subreddit_'||s.id,COALESCE(NULLIF(btrim(s.name),''),'Subreddit '||s.id),'subreddit',GREATEST(COALESCE(s.subscribers,0),0),
- COALESCE(previous.x,resident.x,related.x + (hashtextextended(s.id::text,11)%2000)/100.0,(hashtextextended(s.id::text,11)%1000000)/10.0),
- COALESCE(previous.y,resident.y,related.y + (hashtextextended(s.id::text,12)%2000)/100.0,(hashtextextended(s.id::text,12)%1000000)/10.0),
- COALESCE(previous.z,resident.z,related.z + (hashtextextended(s.id::text,13)%2000)/100.0,(hashtextextended(s.id::text,13)%1000000)/10.0),
+ COALESCE(previous.x,force.x,resident.x,related.x + (hashtextextended(s.id::text,11)%2000)/100.0,(hashtextextended(s.id::text,11)%1000000)/10.0),
+ COALESCE(previous.y,force.y,resident.y,related.y + (hashtextextended(s.id::text,12)%2000)/100.0,(hashtextextended(s.id::text,12)%1000000)/10.0),
+ COALESCE(previous.z,force.z,resident.z,related.z + (hashtextextended(s.id::text,13)%2000)/100.0,(hashtextextended(s.id::text,13)%1000000)/10.0),
  NULL,
  CASE WHEN resident.id IS NOT NULL THEN resident.id WHEN related.anchor_id IS NOT NULL THEN 'subreddit_'||related.anchor_id END,
  NULL,
  COALESCE(previous.community_id,resident.community_id,related.community_id),
- CASE WHEN previous.id IS NOT NULL THEN 'warm-start' WHEN resident.id IS NOT NULL THEN 'revision-seeded' WHEN related.anchor_id IS NOT NULL THEN 'overlap-seeded' ELSE 'deterministic-global' END,
+ CASE WHEN previous.id IS NOT NULL THEN 'warm-start' WHEN force.provenance IS NOT NULL THEN force.provenance WHEN resident.id IS NOT NULL THEN 'revision-seeded' WHEN related.anchor_id IS NOT NULL THEN 'overlap-seeded' ELSE 'deterministic-global' END,
 	 COALESCE(s.updated_at,s.created_at,to_timestamp(0)),
 	 jsonb_build_object('subscribers',GREATEST(COALESCE(s.subscribers,0),0),'post_count',COALESCE(metric.post_count,0),
 	  'comment_count',COALESCE(metric.comment_count,0),'unique_users',COALESCE(metric.unique_users,0),'activity_count',COALESCE(metric.activity_count,0))
 FROM subreddits s
-LEFT JOIN spatial_catalog_current current ON current.singleton
+LEFT JOIN spatial_catalog_current current ON current.singleton AND NOT $3
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='subreddit_'||s.id
+LEFT JOIN catalog_force_positions force ON force.subreddit_id=s.id
 LEFT JOIN catalog_resident_subreddits resident ON resident.subreddit_id=s.id
 	LEFT JOIN catalog_related_subreddit_seeds related ON related.candidate_id=s.id
 	LEFT JOIN catalog_subreddit_metrics metric ON metric.subreddit_id=s.id
-WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, catalogID, watermark)
+WHERE COALESCE(s.updated_at,s.created_at,to_timestamp(0)) <= $2`, catalogID, watermark, cold)
 	if err != nil {
 		return failTx("subreddit_entities", err)
 	}
@@ -297,12 +351,12 @@ SELECT $1,'user_'||u.id,COALESCE(NULLIF(btrim(u.username),''),'User '||u.id),'us
  jsonb_build_object('post_count',COALESCE(metric.post_count,0),'comment_count',COALESCE(metric.comment_count,0),
   'distinct_communities',COALESCE(metric.distinct_communities,0),'activity_count',COALESCE(metric.activity_count,0),'last_seen',u.last_seen)
 FROM users u
-LEFT JOIN spatial_catalog_current current ON current.singleton
+LEFT JOIN spatial_catalog_current current ON current.singleton AND NOT $3
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='user_'||u.id
 LEFT JOIN catalog_user_anchors anchor ON anchor.user_id=u.id
 LEFT JOIN catalog_user_metrics metric ON metric.user_id=u.id
 WHERE COALESCE(u.updated_at,u.created_at,to_timestamp(0)) <= $2
- AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=u.id)`, catalogID, watermark)
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=u.id)`, catalogID, watermark, cold)
 	if err != nil {
 		return failTx("user_entities", err)
 	}
@@ -323,11 +377,11 @@ SELECT $1,'post_'||p.id,
   'top_level_comment_count',COALESCE(metric.top_level_comment_count,0),'reply_count',COALESCE(metric.reply_count,0),'created_at',p.created_at)
 FROM posts p
 JOIN spatial_catalog_entities subreddit ON subreddit.catalog_id=$1 AND subreddit.id='subreddit_'||p.subreddit_id
-LEFT JOIN spatial_catalog_current current ON current.singleton
+LEFT JOIN spatial_catalog_current current ON current.singleton AND NOT $3
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='post_'||p.id
 LEFT JOIN catalog_post_metrics metric ON metric.post_id=p.id
 WHERE COALESCE(p.updated_at,p.created_at,to_timestamp(0)) <= $2
- AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`, catalogID, watermark)
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=p.author_id)`, catalogID, watermark, cold)
 	if err != nil {
 		return failTx("post_entities", err)
 	}
@@ -349,11 +403,11 @@ SELECT $1,'comment_'||c.id,
   'depth',COALESCE(c.depth,0),'created_at',c.created_at)
 FROM comments c
 JOIN spatial_catalog_entities post ON post.catalog_id=$1 AND post.id='post_'||c.post_id
-LEFT JOIN spatial_catalog_current current ON current.singleton
+LEFT JOIN spatial_catalog_current current ON current.singleton AND NOT $3
 LEFT JOIN spatial_catalog_entities previous ON previous.catalog_id=current.catalog_id AND previous.id='comment_'||c.id
 LEFT JOIN catalog_comment_metrics metric ON metric.comment_id=c.id
 WHERE COALESCE(c.updated_at,c.created_at,to_timestamp(0)) <= $2
- AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id)`, catalogID, watermark)
+ AND NOT EXISTS (SELECT 1 FROM catalog_automated_users automated WHERE automated.user_id=c.author_id)`, catalogID, watermark, cold)
 	if err != nil {
 		return failTx("comment_entities", err)
 	}

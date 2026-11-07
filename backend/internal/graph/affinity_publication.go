@@ -65,13 +65,23 @@ SELECT count(*),count(*) FILTER(WHERE naming_method='deterministic-fallback') FR
 	if err = tx.QueryRowContext(ctx, `INSERT INTO graph_revisions(status,source_watermark,algorithm_version,config,layout_algorithm,layout_seed,layout_dimensions,spatial_catalog_id,affinity_build_id,scene_contract) VALUES('staging',$1,'affinity-world-v2',$2::jsonb,'stable-community-3d-v2',74036448965714,3,$3,$4,'spatial-scene-v2') RETURNING id`, watermark, string(config), catalogID, buildID).Scan(&revisionID); err != nil {
 		return 0, err
 	}
-	// Stable identities retain their exact prior positions. New landmarks use a
-	// deterministic hash seed and therefore remain byte-stable across retries.
+	// Stable identities retain their exact prior positions unless the catalog
+	// was placed under a new rule, in which case every landmark moves to the
+	// centroid of its member subreddits. A landmark without members keeps a
+	// deterministic hash seed and therefore remains byte-stable across retries.
+	placementChanged, err := catalogPlacementChanged(ctx, tx, catalogID)
+	if err != nil {
+		return 0, fmt.Errorf("compare catalog placement: %w", err)
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_communities(revision_id,community_id,parent_id,level,label,size,x,y,z,display_name,evidence_label,macro_group_id,primary_color,secondary_color,distinctiveness,affinity_confidence,bridge_affinity,is_bridge,naming_method,naming_version,naming_confidence,representative_members,evidence_metrics)
 SELECT $1,c.community_id,c.macro_group_id,0,c.evidence_label,(SELECT count(*) FROM affinity_build_community_members m WHERE m.build_id=c.build_id AND m.community_id=c.community_id),
- COALESCE(old.x,((hashtext(c.community_id)::bigint%20000)-10000)/10.0),COALESCE(old.y,((hashtext(c.community_id||':y')::bigint%20000)-10000)/10.0),COALESCE(old.z,((hashtext(c.community_id||':z')::bigint%20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $3 THEN old.x END,centroid.x,((hashtext(c.community_id)::bigint%20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $3 THEN old.y END,centroid.y,((hashtext(c.community_id||':y')::bigint%20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $3 THEN old.z END,centroid.z,((hashtext(c.community_id||':z')::bigint%20000)-10000)/10.0),
  c.display_name,c.evidence_label,c.macro_group_id,c.primary_color,c.secondary_color,c.distinctiveness,c.affinity_confidence,COALESCE((c.evidence_metrics->>'bridge_affinity')::float8,0),c.is_bridge,c.naming_method,c.naming_version,c.naming_confidence,c.representative_members,c.evidence_metrics
-FROM affinity_build_communities c LEFT JOIN graph_revision_current current ON current.singleton LEFT JOIN graph_revision_communities old ON old.revision_id=current.revision_id AND old.community_id=c.community_id WHERE c.build_id=$2`, revisionID, buildID)
+FROM affinity_build_communities c LEFT JOIN graph_revision_current current ON current.singleton LEFT JOIN graph_revision_communities old ON old.revision_id=current.revision_id AND old.community_id=c.community_id
+LEFT JOIN LATERAL (SELECT avg(e.x) x,avg(e.y) y,avg(e.z) z FROM affinity_build_community_members m JOIN spatial_catalog_entities e ON e.catalog_id=$4 AND e.id='subreddit_'||m.subreddit_id WHERE m.build_id=c.build_id AND m.community_id=c.community_id) centroid ON true
+WHERE c.build_id=$2`, revisionID, buildID, placementChanged, catalogID)
 	if err != nil {
 		return 0, fmt.Errorf("publish fine communities: %w", err)
 	}

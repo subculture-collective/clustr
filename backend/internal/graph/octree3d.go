@@ -94,7 +94,13 @@ func (n *octree3DNode) child(point pointMass3D) *octree3DNode {
 }
 
 func buildOctree3D(x, y, z []float64) *octree3DNode {
-	if len(x) == 0 || len(x) != len(y) || len(x) != len(z) {
+	return buildOctree3DWithMass(x, y, z, nil)
+}
+
+// buildOctree3DWithMass builds the tree with one mass per body; a nil slice
+// gives every body unit mass.
+func buildOctree3DWithMass(x, y, z, mass []float64) *octree3DNode {
+	if len(x) == 0 || len(x) != len(y) || len(x) != len(z) || (mass != nil && len(mass) != len(x)) {
 		return nil
 	}
 	minX, maxX, minY, maxY, minZ, maxZ := x[0], x[0], y[0], y[0], z[0], z[0]
@@ -109,12 +115,38 @@ func buildOctree3D(x, y, z []float64) *octree3DNode {
 	}
 	root := &octree3DNode{cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, cz: (minZ + maxZ) / 2, half: size*0.6 + 1e-6}
 	for i := range x {
-		root.insert(pointMass3D{index: i, x: x[i], y: y[i], z: z[i], mass: 1}, 0)
+		m := 1.0
+		if mass != nil {
+			m = mass[i]
+		}
+		root.insert(pointMass3D{index: i, x: x[i], y: y[i], z: z[i], mass: m}, 0)
 	}
 	return root
 }
 
+// repulsionModel selects how repulsion decays with distance.
+type repulsionModel int
+
+const (
+	// inverseSquareRepulsion decays as strength/d^2, like electric charge.
+	inverseSquareRepulsion repulsionModel = iota
+	// inverseDistanceRepulsion decays as strength/d, the Fruchterman-Reingold
+	// model, so groups keep pushing each other apart at long range.
+	inverseDistanceRepulsion
+)
+
+func (model repulsionModel) magnitude(strength, mass, distance float64) float64 {
+	if model == inverseDistanceRepulsion {
+		return strength * mass / distance
+	}
+	return strength * mass / (distance * distance)
+}
+
 func (n *octree3DNode) force(index int, x, y, z, theta, strength float64) (float64, float64, float64) {
+	return n.forceWithModel(index, x, y, z, theta, strength, inverseSquareRepulsion)
+}
+
+func (n *octree3DNode) forceWithModel(index int, x, y, z, theta, strength float64, model repulsionModel) (float64, float64, float64) {
 	if n == nil || n.mass == 0 {
 		return 0, 0, 0
 	}
@@ -130,7 +162,7 @@ func (n *octree3DNode) force(index int, x, y, z, theta, strength float64) (float
 				dx, dy, dz = deterministicDirection3D(index, other.index)
 				distance = 1e-6
 			}
-			magnitude := strength * other.mass / (distance * distance)
+			magnitude := model.magnitude(strength, other.mass, distance)
 			fx -= dx / distance * magnitude
 			fy -= dy / distance * magnitude
 			fz -= dz / distance * magnitude
@@ -140,12 +172,12 @@ func (n *octree3DNode) force(index int, x, y, z, theta, strength float64) (float
 	dx, dy, dz := n.comX-x, n.comY-y, n.comZ-z
 	distance := math.Sqrt(dx*dx + dy*dy + dz*dz)
 	if !n.contains(x, y, z) && distance > 1e-9 && n.half*2/distance < theta {
-		magnitude := strength * n.mass / (distance * distance)
+		magnitude := model.magnitude(strength, n.mass, distance)
 		return -dx / distance * magnitude, -dy / distance * magnitude, -dz / distance * magnitude
 	}
 	fx, fy, fz := 0.0, 0.0, 0.0
 	for _, child := range n.children {
-		cx, cy, cz := child.force(index, x, y, z, theta, strength)
+		cx, cy, cz := child.forceWithModel(index, x, y, z, theta, strength, model)
 		fx, fy, fz = fx+cx, fy+cy, fz+cz
 	}
 	return fx, fy, fz
@@ -160,14 +192,28 @@ func deterministicDirection3D(a, b int) (float64, float64, float64) {
 }
 
 func calculateOctree3DForces(x, y, z, outX, outY, outZ []float64, theta, strength float64) {
+	calculateOctree3DForcesWithModel(x, y, z, outX, outY, outZ, theta, strength, inverseSquareRepulsion)
+}
+
+func calculateOctree3DForcesWithModel(x, y, z, outX, outY, outZ []float64, theta, strength float64, model repulsionModel) {
+	calculateOctree3DMassForces(x, y, z, nil, outX, outY, outZ, theta, strength, model)
+}
+
+// calculateOctree3DMassForces computes repulsion where every pair's force is
+// scaled by both masses; a nil mass slice means unit masses.
+func calculateOctree3DMassForces(x, y, z, mass, outX, outY, outZ []float64, theta, strength float64, model repulsionModel) {
 	for i := range outX {
 		outX[i], outY[i], outZ[i] = 0, 0, 0
 	}
-	tree := buildOctree3D(x, y, z)
+	tree := buildOctree3DWithMass(x, y, z, mass)
 	if tree == nil {
 		return
 	}
 	for i := range x {
-		outX[i], outY[i], outZ[i] = tree.force(i, x[i], y[i], z[i], theta, strength)
+		fx, fy, fz := tree.forceWithModel(i, x[i], y[i], z[i], theta, strength, model)
+		if mass != nil {
+			fx, fy, fz = fx*mass[i], fy*mass[i], fz*mass[i]
+		}
+		outX[i], outY[i], outZ[i] = fx, fy, fz
 	}
 }
