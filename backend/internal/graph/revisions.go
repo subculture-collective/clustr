@@ -191,6 +191,20 @@ RETURNING id`, string(configJSON), sourceWatermark).Scan(&id)
 	if err != nil {
 		return failTx("placement_mode", err)
 	}
+	// Landmark centroids are computed in one pass over the memberships, and
+	// only after a placement change; a per-landmark subquery made the planner
+	// scan the whole catalog once per community.
+	if _, err = tx.ExecContext(ctx, `CREATE TEMP TABLE revision_landmark_centroids(legacy_id integer PRIMARY KEY,x float8,y float8,z float8) ON COMMIT DROP`); err != nil {
+		return failTx("landmark_centroid_table", err)
+	}
+	if placementChanged {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO revision_landmark_centroids(legacy_id,x,y,z)
+SELECT gm.community_id,avg(e.x),avg(e.y),avg(e.z)
+FROM graph_community_members gm JOIN spatial_catalog_entities e ON e.catalog_id=$1 AND e.id=gm.node_id
+GROUP BY gm.community_id`, catalogID); err != nil {
+			return failTx("landmark_centroids", err)
+		}
+	}
 
 	// Match both sides' best weighted membership overlap. Mutual-best matching
 	// prevents one old landmark from being assigned to both sides of a split.
@@ -223,12 +237,11 @@ LEFT JOIN graph_revision_communities old ON old.revision_id=p.revision_id AND ol
 
 	_, err = tx.ExecContext(ctx, `INSERT INTO graph_revision_communities(revision_id,community_id,parent_id,level,label,size,x,y,z)
 SELECT $1,m.stable_id,NULL,0,c.label,c.size,
- COALESCE(CASE WHEN NOT $3 THEN m.old_x END,centroid.x,((hashtext(m.stable_id)::bigint % 20000)-10000)/10.0),
- COALESCE(CASE WHEN NOT $3 THEN m.old_y END,centroid.y,((hashtext(m.stable_id||':y')::bigint % 20000)-10000)/10.0),
- COALESCE(CASE WHEN NOT $3 THEN m.old_z END,centroid.z,((hashtext(m.stable_id||':z')::bigint % 20000)-10000)/10.0)
+ COALESCE(CASE WHEN NOT $2 THEN m.old_x END,centroid.x,((hashtext(m.stable_id)::bigint % 20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $2 THEN m.old_y END,centroid.y,((hashtext(m.stable_id||':y')::bigint % 20000)-10000)/10.0),
+ COALESCE(CASE WHEN NOT $2 THEN m.old_z END,centroid.z,((hashtext(m.stable_id||':z')::bigint % 20000)-10000)/10.0)
 FROM graph_communities c JOIN revision_community_map m ON m.legacy_id=c.id
-LEFT JOIN LATERAL (SELECT avg(e.x) x,avg(e.y) y,avg(e.z) z FROM graph_community_members gm
- JOIN spatial_catalog_entities e ON e.catalog_id=$2 AND e.id=gm.node_id WHERE gm.community_id=c.id) centroid ON true`, id, catalogID, placementChanged)
+LEFT JOIN revision_landmark_centroids centroid ON centroid.legacy_id=c.id`, id, placementChanged)
 	if err != nil {
 		return failTx("community_landmarks", err)
 	}
