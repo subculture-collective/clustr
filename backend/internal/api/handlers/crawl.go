@@ -28,8 +28,6 @@ func PostCrawl(q CrawlQueue) http.HandlerFunc {
 	sanitizer := &middleware.SanitizeInput{}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[PostCrawl] Received request: %v", r)
-
 		// Validate content type
 		if err := middleware.ValidateJSON(r); err != nil {
 			apierr.WriteErrorWithContext(w, r, apierr.ValidationInvalidFormat(""))
