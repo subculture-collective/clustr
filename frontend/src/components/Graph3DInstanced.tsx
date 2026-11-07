@@ -24,6 +24,7 @@ import { useMobileDetect, getMobileGraphConfig } from '../hooks/useMobileDetect'
 import type { SpatialScene } from '../data/SpatialSceneClient';
 import { useSpatialWorldClient } from '../contexts/spatialWorld';
 import { DEFAULT_CAMERA_POSE, poseForTarget, prefersReducedMotion } from '../navigation/SpatialNavigation';
+import { landmarkBodyScale } from '../rendering/landmarkScale';
 
 /**
  * Graph3DInstanced - High-performance 3D graph visualization using InstancedMesh
@@ -84,14 +85,46 @@ interface Props {
 }
 
 /**
+ * Distance multiplier when travelling to one node. The pose helper's default
+ * fits the body to the viewport, which leaves the selected sphere covering
+ * three quarters of the screen height and nothing of its neighbourhood; four
+ * times that distance shows the body at about a quarter of the height.
+ */
+const TRAVEL_FRAMING_MARGIN = 4;
+
+/**
+ * How far past the overview's fit distance the camera may dolly out. Beyond
+ * this the landmarks are a few pixels across and nothing is legible, while
+ * the fixed clip planes used to cut the whole world off at twelve times the
+ * fit distance.
+ */
+const OVERVIEW_MAX_DISTANCE_FACTOR = 3;
+
+/**
+ * Keep the clip planes around the camera's working distance. The planes are
+ * chosen when a scene is framed; without following the camera they clip the
+ * world when the user dollies far out of a small scene.
+ */
+function fitClipPlanes(camera: THREE.PerspectiveCamera, distance: number): void {
+    const near = Math.max(0.1, distance / 1000);
+    const far = Math.max(10000, distance * 12);
+    if (far > camera.far || far < camera.far / 4 || near < camera.near / 2 || near > camera.near * 2) {
+        camera.near = near;
+        camera.far = far;
+        camera.updateProjectionMatrix();
+    }
+}
+
+/**
  * Place the camera so every finite point is in view, looking at the
- * bounding sphere's centre. Returns that sphere, or null without points.
+ * bounding sphere's centre. Returns that sphere and the camera's distance
+ * from its centre, or null without points.
  */
 function frameCameraOnNodes(
     camera: THREE.PerspectiveCamera,
     controls: OrbitControls,
     nodes: ReadonlyArray<{ x?: number; y?: number; z?: number }>,
-): THREE.Sphere | null {
+): { sphere: THREE.Sphere; distance: number } | null {
     const points = nodes
         .filter(node => Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z))
         .map(node => new THREE.Vector3(node.x, node.y, node.z));
@@ -105,7 +138,7 @@ function frameCameraOnNodes(
     camera.updateProjectionMatrix();
     controls.target.copy(sphere.center);
     controls.update();
-    return sphere;
+    return { sphere, distance };
 }
 
 export default function Graph3DInstanced(props: Props) {
@@ -612,6 +645,7 @@ export default function Graph3DInstanced(props: Props) {
                 labelRendererRef.current.updateBillboard(camera);
             }
 
+            fitClipPlanes(camera, camera.position.distanceTo(controls.target));
             renderer.render(scene, camera);
 
             // Throttle camera change emissions
@@ -812,9 +846,10 @@ export default function Graph3DInstanced(props: Props) {
         const communities = filtered.nodes.filter(node => node.type === 'community');
         const subreddits = filtered.nodes.filter(node => node.type === 'subreddit');
         const landmarks = communities.length ? communities : subreddits.length ? subreddits : filtered.nodes;
-        const sphere = frameCameraOnNodes(cameraRef.current, controlsRef.current, landmarks);
-        if (!sphere) return;
-        overviewRadiusRef.current = sphere.radius;
+        const framed = frameCameraOnNodes(cameraRef.current, controlsRef.current, landmarks);
+        if (!framed) return;
+        overviewRadiusRef.current = framed.sphere.radius;
+        controlsRef.current.maxDistance = framed.distance * OVERVIEW_MAX_DISTANCE_FACTOR;
         lastFramedRevisionRef.current = scene.revision;
         renderDirtyRef.current = true;
     }, [scene, filtered.nodes]);
@@ -902,7 +937,7 @@ export default function Graph3DInstanced(props: Props) {
             const val = typeof node.val === 'number' ? node.val : 1;
             switch (node.type) {
                 case 'community':
-                    size = Math.max(2.5, Math.pow(val, 0.25));
+                    size = Math.max(2.5, Math.pow(val, 0.25)) * landmarkBodyScale(overviewRadiusRef.current);
                     break;
                 case 'subreddit':
                     size = Math.max(2, Math.pow(val, 0.35));
@@ -954,7 +989,7 @@ export default function Graph3DInstanced(props: Props) {
                 const base = Math.max(2, Math.pow(deg, 0.35));
                 const value = typeof n.val === 'number' ? n.val : 1;
                 const visualRadius = (n.type === 'community'
-                    ? Math.max(2.5, Math.pow(value, 0.25))
+                    ? Math.max(2.5, Math.pow(value, 0.25)) * landmarkBodyScale(overviewRadiusRef.current)
                     : base) * nodeRelSize;
                 const size = (6 + Math.min(10, base)) / 8; // Normalize to fontSize multiplier
                 
@@ -1178,11 +1213,11 @@ export default function Graph3DInstanced(props: Props) {
         );
         if (position) {
             const val = typeof matchedNode.val === 'number' ? Math.max(1, matchedNode.val) : 1;
-            const baseRadius = matchedNode.type === 'community' ? Math.max(2.5, Math.pow(val, .25))
+            const baseRadius = matchedNode.type === 'community' ? Math.max(2.5, Math.pow(val, .25)) * landmarkBodyScale(overviewRadiusRef.current)
                 : matchedNode.type === 'subreddit' ? Math.max(2, Math.pow(val, .35))
                 : matchedNode.type === 'user' ? Math.max(1.5, Math.pow(val, .5))
                 : matchedNode.type === 'post' ? 1.4 : 1;
-            const pose = poseForTarget(position, { radius: baseRadius * nodeRelSize, verticalFovDegrees: cameraRef.current.fov });
+            const pose = poseForTarget(position, { radius: baseRadius * nodeRelSize, verticalFovDegrees: cameraRef.current.fov, margin: TRAVEL_FRAMING_MARGIN });
             cameraRef.current.position.set(pose.x, pose.y, pose.z);
             controlsRef.current.target.set(pose.targetX, pose.targetY, pose.targetZ);
             controlsRef.current.update();
