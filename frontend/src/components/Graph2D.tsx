@@ -22,7 +22,7 @@ type Graph2DProps = {
   focusNodeId?: string;
   showLabels?: boolean;
   selectedId?: string;
-  onNodeSelect?: (id?: string) => void;
+  onNodeSelect?: (id?: string, name?: string) => void;
   communityResult?: {
     nodeCommunities: Map<string, number>;
     communities: Array<{ id: number; color: string }>;
@@ -165,12 +165,12 @@ export default function Graph2D({
                 tabIndex={activeLandmark === node.id ? 0 : -1}
                 role="button"
                 aria-label={`${node.display_name || node.name || node.id}${node.bridge ? ', bridge cluster' : ''}, ${Number(node.val ?? 0).toLocaleString()} entities`}
-                onClick={() => onNodeSelect?.(node.id)}
+                onClick={() => onNodeSelect?.(node.id, node.display_name || node.name)}
                 onFocus={() => setActiveLandmark(node.id)}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    onNodeSelect?.(node.id);
+                    onNodeSelect?.(node.id, node.display_name || node.name);
                   } else if (event.key.startsWith('Arrow')) {
                     event.preventDefault(); moveSpatialFocus(node.id,event.key);
                   }

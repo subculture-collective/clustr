@@ -59,6 +59,12 @@ export interface SDFTextRendererConfig {
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
+  /**
+   * Called when a label's glyph geometry becomes ready. Troika builds text
+   * asynchronously, so a renderer that draws on demand must draw again once
+   * the label can actually be seen.
+   */
+  onSync?: () => void;
 }
 
 interface TextObject {
@@ -101,6 +107,10 @@ export class SDFTextRenderer {
   private backgroundColor: string;
   private frustum: THREE.Frustum = new THREE.Frustum();
   private cameraMatrix: THREE.Matrix4 = new THREE.Matrix4();
+  private viewportHeight = 900;
+  private readonly onSync: (() => void) | undefined;
+  /** Screen height, in CSS pixels, of a label with size 1. */
+  private static readonly BASE_SCREEN_HEIGHT_PX = 12;
 
   constructor(scene: THREE.Scene, config: SDFTextRendererConfig = {}) {
     this.scene = scene;
@@ -108,6 +118,7 @@ export class SDFTextRenderer {
     this.fontSize = config.fontSize || 8;
     this.color = config.color || '#ffffff';
     this.backgroundColor = config.backgroundColor || '#000000';
+    this.onSync = config.onSync;
 
     // Create group to hold all text objects
     this.group = new THREE.Group();
@@ -148,7 +159,9 @@ export class SDFTextRenderer {
         text.fontSize = this.fontSize * (label.size || 1);
         text.color = this.color;
         text.anchorX = 'center';
-        text.anchorY = 'middle';
+        // The label sits on its anchor point, which callers place at the top
+        // of the node, so a screen-sized label never covers a small node.
+        text.anchorY = 'bottom';
         
         // Add background for better readability
         text.outlineWidth = 0.15;
@@ -197,8 +210,9 @@ export class SDFTextRenderer {
         textObj.alwaysVisible = label.alwaysVisible ?? false;
       }
 
-      // Trigger text sync (troika batches updates)
-      textObj.text.sync();
+      // Trigger text sync (troika batches updates) and ask for a frame once
+      // the glyphs exist.
+      textObj.text.sync(this.onSync);
     }
   }
 
@@ -270,17 +284,34 @@ export class SDFTextRenderer {
     }
   }
 
+  /** Viewport height in CSS pixels, used to keep labels a fixed size on screen. */
+  setViewportHeight(height: number): void {
+    if (Number.isFinite(height) && height > 0) this.viewportHeight = height;
+  }
+
   /**
-   * Make labels always face the camera (billboard effect)
-   * Call this in the animation loop
+   * Face the camera and keep a constant size on screen.
+   * Call this on every drawn frame. Published worlds span ±100,000 units
+   * while labels are a few units tall, so a world-sized label is invisible
+   * from any useful distance; instead each visible label is scaled so a
+   * size-1 label is BASE_SCREEN_HEIGHT_PX tall wherever it is.
    */
   updateBillboard(camera: THREE.Camera): void {
+    const perspective = camera instanceof THREE.PerspectiveCamera ? camera : null;
+    const worldPerPixelAtUnitDistance = perspective
+      ? (2 * Math.tan(THREE.MathUtils.degToRad(perspective.fov / 2))) / this.viewportHeight
+      : 0;
     for (const textObj of this.textObjects.values()) {
-      if (textObj.visible) {
-        // Troika-three-text handles billboarding automatically via its shader
-        // but we ensure the group orientation is correct
-        textObj.text.quaternion.copy(camera.quaternion);
-      }
+      if (!textObj.visible) continue;
+      const text = textObj.text;
+      text.quaternion.copy(camera.quaternion);
+      if (!perspective) continue;
+      const distance = camera.position.distanceTo(text.position);
+      // fontSize already carries the label's size factor, so the target
+      // height scales with it too.
+      const targetWorldHeight = (text.fontSize / this.fontSize) * SDFTextRenderer.BASE_SCREEN_HEIGHT_PX * worldPerPixelAtUnitDistance * distance;
+      const scale = THREE.MathUtils.clamp(targetWorldHeight / text.fontSize, 1e-4, 1e6);
+      text.scale.setScalar(scale);
     }
   }
 
