@@ -56,5 +56,8 @@ export default defineConfig({
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    // The production e2e config builds with the Catalog view enabled; the dev
+    // server must match or `/?view=catalog` falls back to the universe.
+    env: { VITE_CATALOG_ENABLED: 'true' },
   },
 });
