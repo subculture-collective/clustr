@@ -25,6 +25,7 @@ vi.mock('troika-three-text', () => {
     color = '#ffffff';
     anchorX = 'center';
     anchorY = 'middle';
+    font = '';
     outlineWidth = 0;
     outlineColor = '';
     outlineOpacity = 0;
@@ -34,8 +35,8 @@ vi.mock('troika-three-text', () => {
       this.material = new THREE.MeshBasicMaterial({ transparent: true });
     }
     
-    sync() {
-      // Mock sync method
+    sync(callback?: () => void) {
+      callback?.();
     }
     
     dispose() {
@@ -48,8 +49,24 @@ vi.mock('troika-three-text', () => {
     }
   }
   
+  class MockBatchedText extends MockText {
+    members = new Set<THREE.Object3D>();
+    add(...objects: THREE.Object3D[]) {
+      for (const object of objects) this.members.add(object);
+      return this;
+    }
+    remove(...objects: THREE.Object3D[]) {
+      for (const object of objects) this.members.delete(object);
+      return this;
+    }
+    sync(callback?: () => void) {
+      callback?.();
+    }
+  }
+
   return {
     Text: MockText,
+    BatchedText: MockBatchedText,
     configureTextBuilder: vi.fn(),
   };
 });
@@ -254,12 +271,39 @@ describe('SDFTextRenderer', () => {
   });
 
   describe('Billboard Orientation', () => {
+    // Labels are members of the one batch under the renderer's group, not
+    // scene children of their own.
+    const members = () => {
+      const batch = scene.children[0].children[0] as THREE.Object3D & { members: Set<THREE.Object3D> };
+      return Array.from(batch.members);
+    };
+
     beforeEach(() => {
       renderer = new SDFTextRenderer(scene);
       const labels: LabelData[] = [
         { id: 'node1', text: 'Label 1', position: { x: 0, y: 0, z: 0 } },
       ];
       renderer.setLabels(labels);
+    });
+
+    it('draws every label through one batch and collapses hidden members', () => {
+      renderer.setLabels([
+        { id: 'node1', text: 'Label 1', position: { x: 0, y: 0, z: 0 } },
+        { id: 'node2', text: 'Label 2', position: { x: 10, y: 0, z: 0 } },
+        { id: 'node3', text: 'Label 3', position: { x: 0, y: 10, z: 0 } },
+      ]);
+      expect(scene.children[0].children).toHaveLength(1);
+      expect(members()).toHaveLength(3);
+
+      const perspective = new THREE.PerspectiveCamera(90, 1, 0.1, 1e6);
+      perspective.position.set(0, 0, 1000);
+      perspective.updateMatrixWorld();
+      renderer.updateVisibility(perspective, new Set(['node2']));
+      renderer.updateBillboard(perspective);
+      const scales = members().map((member) => member.scale.x);
+      expect(scales.filter((scale) => scale === 0)).toHaveLength(2);
+      expect(scales.filter((scale) => scale > 0)).toHaveLength(1);
+      expect(renderer.getStats().visibleLabels).toBe(1);
     });
 
     it('should update billboard orientation', () => {
@@ -279,7 +323,7 @@ describe('SDFTextRenderer', () => {
       // fov 90 and a 1000 px viewport: one pixel spans 2 * distance / 1000 units.
       const perspective = new THREE.PerspectiveCamera(90, 1, 0.1, 1e6);
       renderer.setViewportHeight(1000);
-      const text = scene.children[0].children[0] as THREE.Object3D & { fontSize: number };
+      const text = members()[0];
 
       perspective.position.set(0, 0, 1000);
       perspective.updateMatrixWorld();
