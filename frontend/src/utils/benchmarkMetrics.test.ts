@@ -74,6 +74,37 @@ describe('benchmark regression policy', () => {
     expect(comparison.regressionDetails?.[0]).toContain('Memory usage increased');
   });
 
+  it('allows 10k memory noise within the absolute memory budget', () => {
+    const previous = result('10k', 2500, 60, 44.2);
+    const [comparison] = compareWithBaseline(
+      [result('10k', 2500, 60, 60)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(false);
+  });
+
+  it('allows 50k memory noise within the absolute memory budget', () => {
+    const previous = result('50k', 8000, 60, 46.2);
+    const [comparison] = compareWithBaseline(
+      [result('50k', 8000, 60, 72.8)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(false);
+  });
+
+  it('rejects 50k memory usage above its absolute budget', () => {
+    const previous = result('50k', 8000, 60, 46.2);
+    const [comparison] = compareWithBaseline(
+      [result('50k', 8000, 60, 101)],
+      baseline(previous),
+    );
+
+    expect(comparison.isRegression).toBe(true);
+    expect(comparison.regressionDetails?.[0]).toContain('Memory usage increased');
+  });
+
   it('allows 10k startup changes within the absolute render budget', () => {
     const previous = result('10k', 500, 60, 25);
     const [comparison] = compareWithBaseline(
