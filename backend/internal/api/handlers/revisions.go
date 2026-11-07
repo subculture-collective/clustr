@@ -786,11 +786,11 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
 	artifactID := payload.RevisionID
 	if payload.SpatialCatalog != 0 {
 		// Catalog links among the visible entities are read per visible
-		// source from spatial_catalog_links_source_idx (catalog_id,source,
-		// weight DESC,target), which already carries everything the ranking
-		// needs; a hashed subplan over the visible set answers "target is
-		// visible", and only the heaviest $3 pairs then fetch their relation
-		// and direction by primary key. The LATERAL subquery with its own
+		// source from spatial_catalog_links_source_covering_idx (catalog_id,
+		// source,weight DESC,target INCLUDE relation,directed), which carries
+		// everything the payload needs, so the read is index-only once the
+		// visibility map is set; a hashed subplan over the visible set
+		// answers "target is visible". The LATERAL subquery with its own
 		// LIMIT cannot be flattened, so the planner cannot fall back to a
 		// hash join over a sequential scan of every catalog's links, which
 		// is what the previous plain join did (20.9M rows, 13 s for a
@@ -803,17 +803,14 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
 		// per source and overall, so the payload is unchanged.
 		rows, err := h.db.QueryContext(ctx, `WITH visible AS MATERIALIZED (
  SELECT DISTINCT unnest($2::text[]) id
-), kept AS MATERIALIZED (
- SELECT l.source,l.target,l.weight
+), materialized AS MATERIALIZED (
+ SELECT l.source,l.target,l.relation,l.directed,l.weight
  FROM visible s CROSS JOIN LATERAL (
-  SELECT link.source,link.target,link.weight FROM spatial_catalog_links link
+  SELECT link.source,link.target,link.relation,link.directed,link.weight FROM spatial_catalog_links link
   WHERE link.catalog_id=$1 AND link.source=s.id AND link.target IN (SELECT id FROM visible)
   ORDER BY link.weight DESC,link.target LIMIT $3
  ) l
  ORDER BY l.weight DESC,l.source,l.target LIMIT $3
-), materialized AS (
- SELECT link.source,link.target,link.relation,link.directed,link.weight
- FROM kept JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=kept.source AND link.target=kept.target
 ), owned AS MATERIALIZED (
  -- Read the visible entities once; each structural relation filters them.
  SELECT id,type,parent_id,anchor_id,author_id

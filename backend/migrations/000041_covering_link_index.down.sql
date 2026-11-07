@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS spatial_catalog_links_source_covering_idx;

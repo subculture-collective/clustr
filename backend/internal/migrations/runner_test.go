@@ -38,6 +38,9 @@ func TestConcurrentIndexMigrationRunsOutsideTransaction(t *testing.T) {
 	if !requiresNoTransaction([]byte("CREATE INDEX CONCURRENTLY example_idx ON example(id);")) {
 		t.Fatal("concurrent index migration was not classified as non-transactional")
 	}
+	if !requiresNoTransaction([]byte("DROP INDEX CONCURRENTLY IF EXISTS example_idx;")) {
+		t.Fatal("concurrent index drop must run outside a transaction")
+	}
 	if requiresNoTransaction([]byte("CREATE INDEX example_idx ON example(id);")) {
 		t.Fatal("ordinary index migration must remain transactional")
 	}
