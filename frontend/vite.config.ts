@@ -22,6 +22,14 @@ export default defineConfig(({ mode }) => {
       "/api": proxyTarget,
     },
   },
+  optimizeDeps: {
+    // The layout worker is the only importer of d3-force, and the dependency
+    // scanner does not crawl workers. On a cold cache the dev server discovers
+    // it when the worker starts, re-optimizes, and reloads the page about a
+    // second after load. That reload is what kills the Playwright benchmark
+    // on a fresh CI checkout. Pre-bundling it keeps the first load stable.
+    include: ["d3-force"],
+  },
   build: {
     // Three.js is a deliberately isolated 270 kB gzip vendor chunk. Keep the
     // warning threshold above that stable dependency while retaining the
