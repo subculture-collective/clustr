@@ -54,11 +54,16 @@ interface AbsolutePerformanceBudget {
 }
 
 // The instanced renderer trades a bounded amount of small-scene startup cost
-// for substantially better scaling. Larger fixtures retain percentage-only gates.
+// for substantially better scaling, so render time has an absolute budget per
+// fixture. Memory is a JS heap snapshot and moves with GC timing: identical
+// frontend code measured 50k between 46 MB and 73 MB across CI runs in
+// November 2026, so a percentage gate alone fails at random. Each fixture's
+// memory budget is about twice its observed median, which still catches a
+// leak or a duplicated buffer while ignoring collector noise.
 const ABSOLUTE_PERFORMANCE_BUDGETS: Record<string, AbsolutePerformanceBudget> = {
   '1k': { renderTime: 1200, memoryUsage: 50 },
-  '10k': { renderTime: 3500 },
-  '50k': { renderTime: 10000 },
+  '10k': { renderTime: 3500, memoryUsage: 80 },
+  '50k': { renderTime: 10000, memoryUsage: 100 },
 };
 
 /**

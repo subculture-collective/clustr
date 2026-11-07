@@ -88,7 +88,7 @@ npm run benchmark:compare
 The comparison script checks for:
 - **FPS regression**: >10% drop in steady-state FPS
 - **Render time regression**: >20% increase in initial render time
-- **Memory regression**: >30% increase in memory usage
+- **Memory regression**: >30% increase in memory usage *and* above the fixture's absolute memory budget (50 MB for 1k, 80 MB for 10k, 100 MB for 50k). The JS heap snapshot varies by 20–30% between runs of the same code, so the percentage alone is not a signal.
 
 ### Updating Baseline
 
@@ -260,7 +260,7 @@ Edit `fixtures/generateFixtures.ts` to adjust:
 Edit `compare.ts` to adjust failure thresholds:
 - FPS regression: `FPS_REGRESSION_THRESHOLD` (default: 10%)
 - Render time: 20% threshold
-- Memory usage: 30% threshold
+- Memory usage: 30% threshold, gated by the absolute budgets in `benchmarks/utils/metrics.ts`
 
 ## Best Practices
 
