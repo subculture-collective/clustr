@@ -25,6 +25,7 @@ import type { SpatialScene } from '../data/SpatialSceneClient';
 import { useSpatialWorldClient } from '../contexts/spatialWorld';
 import { DEFAULT_CAMERA_POSE, poseForTarget, prefersReducedMotion } from '../navigation/SpatialNavigation';
 import { landmarkBodyScale } from '../rendering/landmarkScale';
+import { filterLinkedOnly } from '../rendering/linkedOnlyFilter';
 
 /**
  * Graph3DInstanced - High-performance 3D graph visualization using InstancedMesh
@@ -789,16 +790,11 @@ export default function Graph3DInstanced(props: Props) {
             l => nodeIds.has(l.source) && nodeIds.has(l.target),
         );
 
-        // "Linked only" hides isolated nodes in a scene that carries links.
-        // Region scenes are requested without links; applying it to them
-        // would hide every node.
-        if (onlyLinked && graphData.links.length > 0) {
-            const linkedIds = new Set<string>();
-            for (const link of links) {
-                linkedIds.add(link.source);
-                linkedIds.add(link.target);
-            }
-            nodes = nodes.filter(n => linkedIds.has(n.id));
+        // "Linked only" hides isolated nodes in a scene that carries links,
+        // except community landmarks, which the overview's link budget leaves
+        // isolated by design. See filterLinkedOnly for the rules.
+        if (onlyLinked) {
+            nodes = filterLinkedOnly(nodes, links, graphData.links.length > 0);
         }
 
         // Limit to max nodes/links
