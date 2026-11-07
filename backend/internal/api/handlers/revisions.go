@@ -785,13 +785,27 @@ func (h *RevisionHandler) appendLinks(ctx context.Context, payload *scenePayload
 	key := "revision_id"
 	artifactID := payload.RevisionID
 	if payload.SpatialCatalog != 0 {
+		// Catalog links among the visible entities are read from the source
+		// index alone first: (catalog_id,source,weight,target) answers
+		// "source is visible", the hash join against the visible set answers
+		// "target is visible", and only the heaviest $3 pairs then fetch their
+		// relation and direction by primary key. Joining the whole links table
+		// to the visible set instead made the planner scan every catalog's
+		// links (20.9M rows, 13 s for a 5,000-node hub scene on production);
+		// pushing target=ANY($2) into the index scan cost 5 s in per-entry
+		// array checks. Because (catalog_id,source,target) is unique, the
+		// top-$3 catalog links by (weight DESC,source,target) are exactly the
+		// catalog links that can appear in the final top-$3.
 		rows, err := h.db.QueryContext(ctx, `WITH visible AS MATERIALIZED (
- SELECT unnest($2::text[]) id
+ SELECT DISTINCT unnest($2::text[]) id
+), kept AS MATERIALIZED (
+ SELECT link.source,link.target,link.weight
+ FROM spatial_catalog_links link JOIN visible target ON target.id=link.target
+ WHERE link.catalog_id=$1 AND link.source=ANY($2)
+ ORDER BY link.weight DESC,link.source,link.target LIMIT $3
 ), materialized AS (
  SELECT link.source,link.target,link.relation,link.directed,link.weight
- FROM visible source
- JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=source.id
- JOIN visible target ON target.id=link.target
+ FROM kept JOIN spatial_catalog_links link ON link.catalog_id=$1 AND link.source=kept.source AND link.target=kept.target
 ), owned AS MATERIALIZED (
  -- Read the visible entities once; each structural relation filters them.
  SELECT id,type,parent_id,anchor_id,author_id
