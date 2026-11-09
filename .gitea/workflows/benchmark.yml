@@ -1,0 +1,159 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate test fixtures
+        working-directory: ./frontend
+        run: npm run benchmark:generate-fixtures
+
+      - name: Run benchmarks
+        working-directory: ./frontend
+        run: npm run benchmark
+        id: run_benchmarks
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: benchmark-results
+          path: frontend/benchmarks/results/
+          retention-days: 90
+
+      - name: Check benchmark run status
+        if: steps.run_benchmarks.outcome == 'failure'
+        run: |
+          echo "::warning::Benchmarks failed to complete. Results may be incomplete."
+
+      - name: Download baseline
+        uses: actions/download-artifact@v3
+        continue-on-error: true
+        with:
+          name: benchmark-baseline
+          path: frontend/benchmarks/results/
+
+      - name: Compare with baseline
+        working-directory: ./frontend
+        if: hashFiles('frontend/benchmarks/results/baseline.json') != ''
+        run: npm run benchmark:compare
+        id: compare_benchmarks
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            const resultsPath = path.join(process.cwd(), 'frontend/benchmarks/results/benchmark-latest.json');
+            
+            if (!fs.existsSync(resultsPath)) {
+              console.log('No benchmark results found');
+              return;
+            }
+            
+            const results = JSON.parse(fs.readFileSync(resultsPath, 'utf-8'));
+            
+            let comment = '## 📊 Performance Benchmark Results\n\n';
+            comment += '| Fixture | Nodes | Links | Render Time | Steady FPS | Parse Time | Memory |\n';
+            comment += '|---------|-------|-------|-------------|------------|------------|--------|\n';
+            
+            for (const result of results.results) {
+              const m = result.metrics;
+              comment += `| ${result.fixture} `;
+              comment += `| ${m.nodeCount.toLocaleString()} `;
+              comment += `| ${m.linkCount.toLocaleString()} `;
+              comment += `| ${m.renderTime.toFixed(0)}ms `;
+              comment += `| ${m.steadyStateFps.toFixed(1)} `;
+              comment += `| ${m.dataParseTime.toFixed(0)}ms `;
+              comment += `| ${m.memoryUsage.toFixed(1)}MB |\n`;
+            }
+            
+            comment += '\n---\n';
+            comment += `*Benchmarked at ${new Date(results.timestamp).toLocaleString()}*\n`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if benchmark run failed
+        if: steps.run_benchmarks.outcome == 'failure'
+        run: |
+          echo "::error::Benchmark run failed. Check logs for details."
+          exit 1
+
+      - name: Fail if regression detected
+        if: steps.compare_benchmarks.outcome == 'failure'
+        run: |
+          echo "::error::Performance regression detected! Check the benchmark comparison for details."
+          exit 1
+
+  # Store baseline on main branch
+  store-baseline:
+    name: Store Baseline
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: benchmark
+    
+    steps:
+      - name: Download benchmark results
+        uses: actions/download-artifact@v3
+        with:
+          name: benchmark-results
+          path: frontend/benchmarks/results/
+
+      - name: Copy latest to baseline
+        run: |
+          cd frontend/benchmarks/results
+          if [ -f benchmark-latest.json ]; then
+            cp benchmark-latest.json baseline.json
+            echo "✅ Updated baseline from latest results"
+          else
+            echo "⚠️  No benchmark results to store"
+          fi
+
+      - name: Upload new baseline
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-baseline
+          path: frontend/benchmarks/results/baseline.json
+          retention-days: 365

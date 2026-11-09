@@ -253,3 +253,11 @@ The product identity and selected public exports are recorded in [the brand hand
 The [automatic frontend deployment](docs/automatic-frontend-deployment.md) path
 promotes verified main CI to the existing Almaz frontend. Backend and Catalog
 promotion retain their separate release gates.
+
+## Public mirror CI
+
+Pull-request verification runs on standard GitHub-hosted runners in the public
+[subculture-collective/clustr mirror](https://github.com/subculture-collective/clustr/actions/workflows/mirror-ci.yml).
+Gitea remains the source for changes and pull requests. Its required
+`GitHub CI / Mirror CI gate` status follows the exact mirrored commit. Main-branch
+release verification and deployments run in Gitea.
