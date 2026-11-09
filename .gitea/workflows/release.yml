@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  qualify-source:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: github.server_url == 'https://github.com'
+    uses: ./.github/workflows/ci.yml
+
+  create-release:
+    needs: qualify-source
+    if: github.server_url == 'https://github.com'
+    name: Create Release
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          # Get the previous tag
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+          if [ -z "$PREVIOUS_TAG" ]; then
+            # If no previous tag, use the first commit
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          PREVIOUS_TAG=${{ steps.previoustag.outputs.tag }}
+          
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+          
+          # Group commits by type
+          echo "### Features" >> changelog.md
+          git log $PREVIOUS_TAG..$CURRENT_TAG --pretty=format:"- %s (%h)" --grep="^feat" --grep="^feature" >> changelog.md || echo "No new features" >> changelog.md
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          
+          echo "### Bug Fixes" >> changelog.md
+          git log $PREVIOUS_TAG..$CURRENT_TAG --pretty=format:"- %s (%h)" --grep="^fix" --grep="^bugfix" >> changelog.md || echo "No bug fixes" >> changelog.md
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          
+          echo "### Documentation" >> changelog.md
+          git log $PREVIOUS_TAG..$CURRENT_TAG --pretty=format:"- %s (%h)" --grep="^docs" >> changelog.md || echo "No documentation updates" >> changelog.md
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          
+          echo "### Other Changes" >> changelog.md
+          # Get all commits, then filter out the categorized ones
+          # Match formatted output: "- feat:" or "- fix:" etc.
+          git log $PREVIOUS_TAG..$CURRENT_TAG --pretty=format:"- %s (%h)" | grep -vE "^- (feat|feature|fix|bugfix|docs):" >> changelog.md || echo "No other changes" >> changelog.md
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$CURRENT_TAG" >> changelog.md
+          
+          # Output for use in release
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false
+

@@ -1,0 +1,377 @@
+name: Mirror CI
+run-name: Mirror CI ${{ github.sha }}
+'on':
+  push: null
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.26.10
+        cache: true
+        cache-dependency-path: backend/go.sum
+    - name: Verify dependencies
+      working-directory: ./backend
+      run: |
+        go mod verify
+        go mod download
+    - name: Run go vet
+      working-directory: ./backend
+      run: go vet ./...
+    - name: Check for Go vulnerabilities
+      working-directory: ./backend
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+        govulncheck ./...
+    - name: Run static security analysis
+      working-directory: ./backend
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@v2.22.10
+        gosec -quiet -include=G101,G102,G103,G106,G107,G201,G202,G203,G204,G301,G302,G303,G305,G401,G402,G403,G405,G406,G407,G501,G502,G503,G504,G505,G506,G601,G602 ./...
+    - name: Run migrated database and race tests
+      run: bash scripts/test-backend-ci.sh
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-coverage
+        path: backend/coverage.out
+        retention-days: 1
+        if-no-files-found: error
+    if: github.repository == 'subculture-collective/clustr'
+  test-frontend:
+    name: Test Frontend
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+    - name: Run linter
+      working-directory: ./frontend
+      run: npm run lint
+    - name: Check for npm vulnerabilities
+      working-directory: ./frontend
+      run: npm audit --audit-level=high
+    - name: Run tests with coverage
+      working-directory: ./frontend
+      run: npm run test:coverage
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-coverage
+        path: frontend/coverage/lcov.info
+        retention-days: 1
+        if-no-files-found: error
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+    - name: Check bundle size
+      id: check_bundle_size
+      working-directory: ./frontend
+      run: npm run size
+      continue-on-error: true
+    - name: Save current bundle stats
+      working-directory: ./frontend
+      run: |
+        npm run --silent size:json > bundle-stats.json
+    - name: Upload bundle visualizer
+      uses: actions/upload-artifact@v4
+      with:
+        name: bundle-stats
+        path: frontend/dist/stats.html
+        retention-days: 1
+    - name: Checkout base branch
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        path: base
+    - name: Set up Node.js for base
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Install dependencies (base)
+      working-directory: ./base/frontend
+      run: npm ci
+      continue-on-error: true
+    - name: Build bundle (base)
+      working-directory: ./base/frontend
+      run: npm run build
+      continue-on-error: true
+    - name: Get base bundle stats
+      working-directory: ./base/frontend
+      run: |
+        npm run --silent size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
+      continue-on-error: true
+    - name: Compare bundle sizes
+      uses: actions/github-script@v7
+      with:
+        script: "const fs = require('fs');\n\n// Read stats files\nlet currentStats = [];\nlet baseStats = [];\n\
+          \ntry {\n  currentStats = JSON.parse(fs.readFileSync('frontend/bundle-stats.json', 'utf8'));\n} catch\
+          \ (e) {\n  core.setFailed('Failed to read current bundle stats: ' + e.message);\n  return;\n}\n\ntry {\n\
+          \  baseStats = JSON.parse(fs.readFileSync('base/frontend/bundle-stats-base.json', 'utf8'));\n} catch (e)\
+          \ {\n  console.log('No base stats available');\n}\n\nif (!Array.isArray(currentStats) || currentStats.length\
+          \ === 0 || currentStats.some(item => typeof item.name !== 'string' || !Number.isFinite(item.size) || !Number.isFinite(item.sizeLimit)\
+          \ || typeof item.passed !== 'boolean')) {\n  core.setFailed('Current bundle stats are empty or invalid');\n\
+          \  return;\n}\n\nfunction formatSize(bytes) {\n  const abs = Math.abs(bytes);\n  if (abs < 1024) return\
+          \ `${abs.toFixed(0)} B`;\n  if (abs < 1024 * 1024) return `${(abs / 1024).toFixed(2)} KB`;\n  return `${(abs\
+          \ / (1024 * 1024)).toFixed(2)} MB`;\n}\n\nfunction formatDiff(current, base) {\n  if (!base || base ===\
+          \ 0) return 'N/A';\n  const diff = current - base;\n  const pct = Math.abs((diff / base) * 100).toFixed(2);\n\
+          \  const sign = diff > 0 ? '+' : diff < 0 ? '-' : '';\n  const emoji = diff > 0 ? '\U0001F534' : diff\
+          \ < 0 ? '\U0001F7E2' : '\u26AA';\n  return `${emoji} ${sign}${formatSize(diff)} (${sign}${pct}%)`;\n}\n\
+          \nlet comment = '## \U0001F4E6 Bundle Size Report\\n\\n';\ncomment += '| File | Current | Base | Diff\
+          \ |\\n';\ncomment += '|------|---------|------|------|\\n';\n\nlet anyExceeded = false;\nlet significantIncrease\
+          \ = false;\n\nfor (const item of currentStats) {\n  const baseItem = baseStats.find(b => b.name === item.name);\n\
+          \  const baseSize = baseItem ? baseItem.size : null;\n\n  comment += `| ${item.name} | ${formatSize(item.size)}\
+          \ | ${baseSize ? formatSize(baseSize) : 'N/A'} | ${formatDiff(item.size, baseSize)} |\\n`;\n\n  // Check\
+          \ if size exceeds limit\n  if (!item.passed) {\n    anyExceeded = true;\n  }\n\n  // Check for significant\
+          \ increases (>5% or >50KB)\n  if (baseSize) {\n    const diff = item.size - baseSize;\n    const pctIncrease\
+          \ = (diff / baseSize) * 100;\n\n    // Keep the absolute CSS cap and reject material relative growth.\n\
+          \    const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' || diff > 5 * 1024;\n    if ((pctIncrease\
+          \ > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {\n      significantIncrease = true;\n    }\n\
+          \  }\n}\n\ncomment += '\\nCSS relative growth requires more than 5 KB added; absolute limits still apply.\\\
+          n\\n';\n\n// Report issues\nif (anyExceeded) {\n  comment += '### \u26A0\uFE0F Bundle Size Limit Exceeded\\\
+          n\\n';\n  for (const item of currentStats) {\n    if (!item.passed) {\n      comment += `- \u274C ${item.name}\
+          \ (${formatSize(item.size)}) exceeds limit of ${formatSize(item.sizeLimit)}\\n`;\n    }\n  }\n  comment\
+          \ += '\\n';\n}\n\nif (significantIncrease && !anyExceeded) {\n  comment += '### \u26A0\uFE0F Significant\
+          \ Bundle Size Increase\\n\\n';\n  for (const item of currentStats) {\n    const baseItem = baseStats.find(b\
+          \ => b.name === item.name);\n    if (baseItem) {\n      const diff = item.size - baseItem.size;\n    \
+          \  const pctIncrease = (diff / baseItem.size) * 100;\n\n      // Keep the absolute CSS cap and reject\
+          \ material relative growth.\n    const relativeGrowthIsMaterial = item.name !== 'Total CSS bundle' ||\
+          \ diff > 5 * 1024;\n    if ((pctIncrease > 5 && relativeGrowthIsMaterial) || diff > 50 * 1024) {\n   \
+          \     comment += `- ${item.name} increased by ${formatSize(diff)} (${pctIncrease.toFixed(2)}%), exceeding\
+          \ the threshold of 5% or 50KB\\n`;\n      }\n    }\n  }\n  comment += '\\n';\n}\n\ncomment += '\\n\U0001F4CA\
+          \ [View detailed bundle analysis](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id\
+          \ }})\\n';\n\nconsole.log(comment);\n\n// Fail if limits are exceeded\nif (anyExceeded) {\n  core.setFailed('Bundle\
+          \ size exceeds configured limits');\n}\n\n// Fail on significant increases, retaining the CSS noise floor.\n\
+          if (significantIncrease && !anyExceeded) {\n  core.setFailed('Bundle size increased significantly (>5%,\
+          \ with a 5KB CSS floor, or >50KB)');\n}\n"
+    if: github.repository == 'subculture-collective/clustr'
+  visual-regression:
+    name: Visual Regression Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs:
+    - test-frontend
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+    - name: Install Playwright browsers
+      working-directory: ./frontend
+      run: npx playwright install chromium --with-deps
+    - name: Run visual regression tests
+      working-directory: ./frontend
+      run: npm run test:visual
+    - name: Run production-bundle interaction tests
+      working-directory: ./frontend
+      run: npm run test:e2e:production
+    - name: Upload test report on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-visual-report
+        path: frontend/playwright-report/
+        retention-days: 1
+    - name: Upload test results on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-visual-results
+        path: frontend/test-results/
+        retention-days: 1
+    if: github.repository == 'subculture-collective/clustr'
+  build-backend-images:
+    name: Build Backend Docker Images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs:
+    - test-backend
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+        - server
+        - crawler
+        - precalculate
+        - migrate
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Get Docker file name
+      id: dockerfile
+      run: |
+        if [ "${{ matrix.component }}" = "server" ]; then
+          echo "file=Dockerfile" >> "$GITHUB_OUTPUT"
+        else
+          echo "file=Dockerfile.${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Build Docker image
+      run: |
+        docker build --pull \
+          --file "./backend/${{ steps.dockerfile.outputs.file }}" \
+          --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
+          --build-arg "VERSION=${{ github.ref_name }}" \
+          --build-arg "COMMIT=${{ github.sha }}" \
+          --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
+          ./backend
+    - name: Scan the built server image
+      if: matrix.component == 'server'
+      run: |
+        docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+          --severity CRITICAL,HIGH --format table reddit-cluster-${{ matrix.component }}:${{ github.sha }}
+    if: github.repository == 'subculture-collective/clustr'
+  build-frontend-image:
+    name: Build Frontend Docker Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs:
+    - test-frontend
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build Docker image
+      run: |
+        docker build --pull \
+          --file ./frontend/Dockerfile \
+          --tag "reddit-cluster-frontend:${{ github.sha }}" \
+          ./frontend
+    - name: Scan the built image
+      run: |
+        docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+          --severity CRITICAL,HIGH --format table reddit-cluster-frontend:${{ github.sha }}
+    if: github.repository == 'subculture-collective/clustr'
+  secrets:
+    name: Secret Scanning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@v5
+      with:
+        go-version: 1.26.10
+        cache: true
+        cache-dependency-path: backend/go.sum
+    - name: Scan changed commits
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      run: |
+        go install github.com/zricethezav/gitleaks/v8@v8.28.0
+        if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+          gitleaks git --redact --log-opts="$BASE_SHA..HEAD"
+        else
+          gitleaks git --redact
+        fi
+    if: github.repository == 'subculture-collective/clustr'
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+    - name: Install Playwright browsers
+      working-directory: ./frontend
+      run: npx playwright install --with-deps chromium
+    - name: Generate test fixtures
+      working-directory: ./frontend
+      run: npm run benchmark:generate-fixtures
+    - name: Run benchmarks
+      working-directory: ./frontend
+      run: npm run benchmark
+      id: run_benchmarks
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: benchmark-results
+        path: frontend/benchmarks/results/
+        retention-days: 1
+    - name: Check benchmark run status
+      if: steps.run_benchmarks.outcome == 'failure'
+      run: |
+        echo "::warning::Benchmarks failed to complete. Results may be incomplete."
+    - name: Compare with baseline
+      working-directory: ./frontend
+      if: hashFiles('frontend/benchmarks/results/baseline.json') != ''
+      run: npm run benchmark:compare
+      id: compare_benchmarks
+    - name: Fail if benchmark run failed
+      if: steps.run_benchmarks.outcome == 'failure'
+      run: |
+        echo "::error::Benchmark run failed. Check logs for details."
+        exit 1
+    - name: Fail if regression detected
+      if: steps.compare_benchmarks.outcome == 'failure'
+      run: |
+        echo "::error::Performance regression detected! Check the benchmark comparison for details."
+        exit 1
+    if: github.repository == 'subculture-collective/clustr'
+  mirror-gate:
+    name: Mirror CI gate
+    if: always() && github.repository == 'subculture-collective/clustr'
+    needs:
+    - test-backend
+    - test-frontend
+    - visual-regression
+    - build-backend-images
+    - build-frontend-image
+    - secrets
+    - benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Require every verification job
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+      run: |
+        python3 - <<'PY'
+        import json, os
+        results = json.loads(os.environ["RESULTS"])
+        expected = {'build-frontend-image', 'build-backend-images', 'benchmark', 'secrets', 'visual-regression', 'test-frontend', 'test-backend'}
+        assert set(results) == expected, results
+        for name, result in results.items():
+            assert result["result"] == "success", name + " did not pass"
+        PY
