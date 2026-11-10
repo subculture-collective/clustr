@@ -1,7 +1,9 @@
 name: Mirror CI
 run-name: Mirror CI ${{ github.sha }}
 'on':
-  push: null
+  push:
+    branches-ignore:
+    - main
   workflow_dispatch: null
 permissions:
   contents: read
@@ -15,9 +17,9 @@ jobs:
     timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
       with:
         go-version: 1.26.10
         cache: true
@@ -43,7 +45,7 @@ jobs:
     - name: Run migrated database and race tests
       run: bash scripts/test-backend-ci.sh
     - name: Upload coverage
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: backend-coverage
         path: backend/coverage.out
@@ -58,9 +60,9 @@ jobs:
     timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: '24'
         cache: npm
@@ -78,7 +80,7 @@ jobs:
       working-directory: ./frontend
       run: npm run test:coverage
     - name: Upload coverage
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: frontend-coverage
         path: frontend/coverage/lcov.info
@@ -97,18 +99,18 @@ jobs:
       run: |
         npm run --silent size:json > bundle-stats.json
     - name: Upload bundle visualizer
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: bundle-stats
         path: frontend/dist/stats.html
         retention-days: 1
     - name: Checkout base branch
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         ref: main
         path: base
     - name: Set up Node.js for base
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: '24'
     - name: Install dependencies (base)
@@ -125,7 +127,7 @@ jobs:
         npm run --silent size:json > bundle-stats-base.json || echo '[]' > bundle-stats-base.json
       continue-on-error: true
     - name: Compare bundle sizes
-      uses: actions/github-script@v7
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
       with:
         script: "const fs = require('fs');\n\n// Read stats files\nlet currentStats = [];\nlet baseStats = [];\n\
           \ntry {\n  currentStats = JSON.parse(fs.readFileSync('frontend/bundle-stats.json', 'utf8'));\n} catch\
@@ -176,9 +178,9 @@ jobs:
     - test-frontend
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: '24'
         cache: npm
@@ -197,14 +199,14 @@ jobs:
       run: npm run test:e2e:production
     - name: Upload test report on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: playwright-visual-report
         path: frontend/playwright-report/
         retention-days: 1
     - name: Upload test results on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: playwright-visual-results
         path: frontend/test-results/
@@ -216,40 +218,39 @@ jobs:
     timeout-minutes: 30
     needs:
     - test-backend
-    strategy:
-      fail-fast: false
-      matrix:
-        component:
-        - server
-        - crawler
-        - precalculate
-        - migrate
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Get Docker file name
-      id: dockerfile
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - name: Build every backend image and scan the server image
+      shell: bash
+      env:
+        BUILD_TIME: ${{ github.event.head_commit.timestamp }}
       run: |
-        if [ "${{ matrix.component }}" = "server" ]; then
-          echo "file=Dockerfile" >> "$GITHUB_OUTPUT"
-        else
-          echo "file=Dockerfile.${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+        # One job builds all four images in sequence (they share the Go module
+        # layers); every image is still attempted and any failure fails the job.
+        failed=()
+        for component in server crawler precalculate migrate; do
+          if [ "$component" = server ]; then file=Dockerfile; else file="Dockerfile.$component"; fi
+          echo "::group::Build $component"
+          if ! docker build --pull \
+            --file "./backend/$file" \
+            --tag "reddit-cluster-$component:${{ github.sha }}" \
+            --build-arg "VERSION=${{ github.ref_name }}" \
+            --build-arg "COMMIT=${{ github.sha }}" \
+            --build-arg "BUILD_TIME=$BUILD_TIME" \
+            ./backend; then
+            failed+=("$component build")
+          elif [ "$component" = server ] && ! docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table "reddit-cluster-$component:${{ github.sha }}"; then
+            failed+=("$component scan")
+          fi
+          echo "::endgroup::"
+        done
+        if [ "${#failed[@]}" -gt 0 ]; then
+          printf '::error::%s failed\n' "${failed[@]}"
+          exit 1
         fi
-    - name: Build Docker image
-      run: |
-        docker build --pull \
-          --file "./backend/${{ steps.dockerfile.outputs.file }}" \
-          --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
-          --build-arg "VERSION=${{ github.ref_name }}" \
-          --build-arg "COMMIT=${{ github.sha }}" \
-          --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
-          ./backend
-    - name: Scan the built server image
-      if: matrix.component == 'server'
-      run: |
-        docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
-          aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
-          --severity CRITICAL,HIGH --format table reddit-cluster-${{ matrix.component }}:${{ github.sha }}
     if: github.repository == 'subculture-collective/clustr'
   build-frontend-image:
     name: Build Frontend Docker Image
@@ -259,7 +260,7 @@ jobs:
     - test-frontend
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
     - name: Build Docker image
       run: |
         docker build --pull \
@@ -277,10 +278,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         fetch-depth: 0
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
       with:
         go-version: 1.26.10
         cache: true
@@ -302,9 +303,9 @@ jobs:
     timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: '24'
         cache: npm
@@ -323,7 +324,7 @@ jobs:
       run: npm run benchmark
       id: run_benchmarks
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       if: always()
       with:
         name: benchmark-results
