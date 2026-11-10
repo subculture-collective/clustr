@@ -448,7 +448,8 @@ jobs:
   frontend-deploy:
     name: Deploy verified frontend to Almaz
     needs: [test-backend, test-frontend, visual-regression, build-backend-images, build-frontend-image, secrets]
-    runs-on: ubuntu-latest
+    # Homelab deploy keys accept only Kvant's address (Kvant and its Kuznya VM); the kvant label keeps this job off Buran.
+    runs-on: [ubuntu-latest, kvant]
     timeout-minutes: 25
     env:
       DEPLOY_REVISION: ${{ github.sha }}
