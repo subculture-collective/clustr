@@ -1,0 +1,126 @@
+name: Deploy
+run-name: Deploy ${{ github.sha }}
+
+# Deploys main to Almaz. The job joins the tailnet as tag:github-ci (Tailscale
+# OAuth client in the TS_OAUTH_* secrets), then uses this repository's deploy
+# key, which Almaz accepts only from tailnet addresses and only for the
+# clustr fleet-deploy receiver.
+'on':
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  # Never cancel a run that may be mid-deployment.
+  cancel-in-progress: false
+
+env:
+  TARGET: onnwee@100.77.128.80
+  DEPLOY_REVISION: ${{ github.sha }}
+
+jobs:
+  deploy:
+    name: Deploy verified frontend to Almaz
+    if: github.repository == 'subculture-collective/clustr' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:github-ci
+          version: latest
+      - name: Prepare the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/deploy"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy/known_hosts"
+      - name: Reuse an already accepted artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          d="$RUNNER_TEMP/deploy"
+          ssh_args=(-F /dev/null -i "$d/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$d/known_hosts" -o ConnectTimeout=15 "$TARGET")
+          # The receiver deploys only Gitea's current main. Kvant copies GitHub
+          # to Gitea every minute, so wait while the revision has not arrived.
+          for attempt in $(seq 1 20); do
+            # shellcheck disable=SC2029
+            if ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$d/artifact.json" 2> "$d/err"; then break; fi
+            if grep -q "no longer the current main" "$d/err" && [ "$attempt" -lt 20 ]; then
+              echo "Gitea has not received $DEPLOY_REVISION yet; waiting 30 s ($attempt/20)"; sleep 30; continue
+            fi
+            cat "$d/err" >&2; exit 1
+          done
+          python3 - "$d/artifact.json" "$GITHUB_OUTPUT" <<'PYCODE'
+          import json, re, sys
+          from pathlib import Path
+          info = json.loads(Path(sys.argv[1]).read_text())
+          available = info.get("available") is True
+          if available:
+              assert re.fullmatch(r"[0-9a-f]{64}", info.get("html_sha256", ""))
+          with Path(sys.argv[2]).open("a") as output:
+              output.write("available=" + str(available).lower() + "\n")
+          PYCODE
+      - name: Build deployable images from the verified revision
+        if: steps.artifact.outputs.available != 'true'
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          # The fleet-deploy receiver identifies the application by the Gitea source label.
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          docker build --build-arg VITE_API_URL=/api --build-arg VITE_CATALOG_ENABLED=false -f frontend/Dockerfile --label "org.opencontainers.image.revision=$DEPLOY_REVISION" \
+            --label "org.opencontainers.image.source=https://git.subcult.tv/subculture-collective/clustr" -t "$image" frontend
+          docker run --rm --network none --add-host reddit-api:127.0.0.1 --add-host api:127.0.0.1 --entrypoint nginx "$image" -t
+      - name: Scan the actual deployment image
+        if: steps.artifact.outputs.available != 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+            --severity CRITICAL,HIGH --format table "fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+      - name: Deploy the built image and verify the live site
+        env:
+          REUSE_ARTIFACT: ${{ steps.artifact.outputs.available }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
+          d="$RUNNER_TEMP/deploy"
+          ssh_args=(-F /dev/null -i "$d/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$d/known_hosts" -o ConnectTimeout=15 "$TARGET")
+          ssh "${ssh_args[@]}" status
+          image="fleet-deploy/clustr/clustr-frontend:$DEPLOY_REVISION"
+          if [[ "$REUSE_ARTIFACT" != true ]]; then
+            # shellcheck disable=SC2029
+            docker save "$image" | ssh "${ssh_args[@]}" "receive $DEPLOY_REVISION clustr-frontend"
+          fi
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "deploy $DEPLOY_REVISION"
+          # shellcheck disable=SC2029
+          ssh "${ssh_args[@]}" "artifact $DEPLOY_REVISION clustr-frontend" > "$d/artifact.json"
+          expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["html_sha256"])' "$d/artifact.json")
+          curl --fail --silent --show-error --retry 4 --retry-all-errors \
+            --max-time 30 https://clustr.subcult.tv/ > "$d/live.html"
+          actual=$(sha256sum "$d/live.html" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+          printf 'Live HTML matches the image built from %s\n' "$DEPLOY_REVISION"
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/deploy"
