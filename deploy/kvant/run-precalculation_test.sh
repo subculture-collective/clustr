@@ -75,6 +75,11 @@ EOF
   cat >"${fake_bin}/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${FAKE_STATE}/docker.log"
+if [[ $1 == inspect ]]; then
+  [[ ${DOCKER_INSPECT_FAIL:-0} != 1 ]] || exit 1
+  printf '%s\n' "${MOUNT_SOURCE-/srv/clustr/pg17}"
+  exit 0
+fi
 if [[ $1 == run ]]; then
   while [[ $# -gt 0 ]]; do
     if [[ $1 == --cidfile ]]; then printf 'fake-container\n' >"$2"; break; fi
@@ -82,7 +87,13 @@ if [[ $1 == run ]]; then
   done
 fi
 EOF
-  chmod +x "${fake_bin}/timeout" "${fake_bin}/ssh" "${fake_bin}/docker"
+  cat >"${fake_bin}/df" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${FAKE_STATE}/df.log"
+[[ ${DF_FAIL:-0} != 1 ]] || exit 1
+printf 'Avail\n%s\n' "${AVAILABLE_BYTES:-42949672960}"
+EOF
+  chmod +x "${fake_bin}/timeout" "${fake_bin}/ssh" "${fake_bin}/docker" "${fake_bin}/df"
 }
 
 write_env() {
@@ -91,6 +102,7 @@ CLUSTR_PRECALCULATE_IMAGE=example.test/precalculate@sha256:aaaaaaaaaaaaaaaaaaaaa
 ALMAZ_LOCAL_DB_PORT=15436
 ALMAZ_POSTGRES_CONTAINER=${CONTAINER_NAME:-pg17-clustr}
 SPATIAL_CATALOG_MIN_FREE_GIB=${MIN_GIB:-40}
+${DB_TARGET:+CLUSTR_DB_TARGET=${DB_TARGET}}
 EOF
 }
 
@@ -100,6 +112,7 @@ run_script() {
   FAKE_STATE="${tmp}/${label}" PATH="${fake_bin}:$PATH" HOME="${tmp}/home-${label}" \
     XDG_RUNTIME_DIR="${tmp}/runtime-${label}" SSH_GATE_FAIL="${SSH_GATE_FAIL:-0}" \
     SSH_INSPECT_FAIL="${SSH_INSPECT_FAIL:-0}" SSH_DF_FAIL="${SSH_DF_FAIL:-0}" \
+    DOCKER_INSPECT_FAIL="${DOCKER_INSPECT_FAIL:-0}" DF_FAIL="${DF_FAIL:-0}" \
     MOUNT_SOURCE="${MOUNT_SOURCE-/mnt/spektr/clustr-pgdata}" \
     AVAILABLE_BYTES="${AVAILABLE_BYTES:-42949672960}" "$script" "${tmp}/worker.env" "$@" \
     >"${tmp}/${label}.out" 2>"${tmp}/${label}.err"
@@ -208,6 +221,32 @@ assert_contains 'ControlPath=none' "${tmp}/catalog/ssh.log"
 assert_contains 'ControlPersist=no' "${tmp}/catalog/ssh.log"
 assert_contains 'ExitOnForwardFailure=yes' "${tmp}/catalog/ssh.log"
 assert_contains 'stop --time 30 fake-container' "${tmp}/catalog/docker.log"
+
+# A local database skips the SSH tunnel and checks the local container's mount.
+DB_TARGET=local write_env
+case_run local-graph 0 graph-revision
+assert_not_contains '<-N>' "${tmp}/local-graph/ssh.log"
+assert_contains '/app/precalculate --once' "${tmp}/local-graph/docker.log"
+MOUNT_SOURCE=/srv/clustr/pg17 case_run local-catalog 0 catalog-rebuild
+assert_contains 'inspect --format' "${tmp}/local-catalog/docker.log"
+assert_contains '-B1 --output=avail -- /srv/clustr/pg17' "${tmp}/local-catalog/df.log"
+assert_contains 'catalog storage preflight: source=/srv/clustr/pg17' "${tmp}/local-catalog.err"
+assert_not_contains 'remote=' "${tmp}/local-catalog/ssh.log"
+assert_not_contains '<-N>' "${tmp}/local-catalog/ssh.log"
+MOUNT_SOURCE=/srv/clustr/pg17 AVAILABLE_BYTES=$((40 * 1024 * 1024 * 1024 - 1)) case_run local-below 69 catalog-preflight
+assert_contains 'Local PostgreSQL filesystem space is below the catalog rebuild threshold' "${tmp}/local-below.err"
+MOUNT_SOURCE=relative/path case_run local-relative-mount 69 catalog-rebuild
+MOUNT_SOURCE=/srv/../etc case_run local-dotdot-mount 69 catalog-rebuild
+MOUNT_SOURCE= case_run local-empty-mount 69 catalog-rebuild
+DOCKER_INSPECT_FAIL=1 case_run local-inspect-failure 69 catalog-rebuild
+assert_contains 'could not inspect local PostgreSQL data mount' "${tmp}/local-inspect-failure.err"
+MOUNT_SOURCE=/srv/clustr/pg17 DF_FAIL=1 case_run local-df-failure 69 catalog-rebuild
+assert_contains 'could not inspect local PostgreSQL filesystem space' "${tmp}/local-df-failure.err"
+DB_TARGET=elsewhere write_env
+case_run invalid-target 65 graph-revision
+assert_contains 'CLUSTR_DB_TARGET must be almaz-tunnel or local' "${tmp}/invalid-target.err"
+unset DB_TARGET
+write_env
 
 if (( fail > 0 )); then
   printf '%d assertions failed\n' "${fail}" >&2
