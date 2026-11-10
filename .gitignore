@@ -116,6 +116,7 @@ backend/backups
 backend/server
 backend/crawler
 backend/precalculate
+backend/integrity
 
 # Go coverage & profiling
 coverage.*
