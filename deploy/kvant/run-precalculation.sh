@@ -33,6 +33,7 @@ cpu_limit=$(env_value CLUSTR_WORKER_CPU_LIMIT)
 memory_limit=$(env_value CLUSTR_WORKER_MEMORY_LIMIT)
 postgres_container=$(env_value ALMAZ_POSTGRES_CONTAINER)
 catalog_min_free_gib=$(env_value SPATIAL_CATALOG_MIN_FREE_GIB)
+db_target=$(env_value CLUSTR_DB_TARGET)
 
 : "${ssh_target:=10.0.0.200}"
 : "${local_db_port:=15436}"
@@ -40,6 +41,7 @@ catalog_min_free_gib=$(env_value SPATIAL_CATALOG_MIN_FREE_GIB)
 : "${memory_limit:=8g}"
 : "${postgres_container:=pg17-clustr}"
 : "${catalog_min_free_gib:=40}"
+: "${db_target:=almaz-tunnel}"
 
 if [[ ! ${local_db_port} =~ ^[0-9]+$ ]] || (( local_db_port < 1024 || local_db_port > 65535 )); then
   echo "ALMAZ_LOCAL_DB_PORT must be an unprivileged TCP port" >&2
@@ -61,7 +63,17 @@ if [[ ${mode} != "graph-revision" && 10#${catalog_min_free_gib} -eq 0 ]]; then
   echo "SPATIAL_CATALOG_MIN_FREE_GIB must be a strictly positive integer within the supported range" >&2
   exit 65
 fi
-for command_name in flock ssh timeout; do
+# almaz-tunnel: PostgreSQL runs on Almaz behind a temporary SSH tunnel.
+# local: PostgreSQL runs on this host and DATABASE_URL reaches it directly.
+if [[ ${db_target} != "almaz-tunnel" && ${db_target} != "local" ]]; then
+  echo "CLUSTR_DB_TARGET must be almaz-tunnel or local" >&2
+  exit 65
+fi
+required_commands=(flock timeout)
+if [[ ${db_target} == "almaz-tunnel" ]]; then
+  required_commands+=(ssh)
+fi
+for command_name in "${required_commands[@]}"; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "required command is missing: ${command_name}" >&2
     exit 69
@@ -138,29 +150,49 @@ ssh_options=(
   -o ServerAliveCountMax=3
 )
 
+local_catalog_storage_probe() {
+  if ! mount_source=$(timeout 15 docker inspect --format "${inspect_format}" "${postgres_container}"); then
+    echo "could not inspect local PostgreSQL data mount; refusing catalog operation" >&2
+    exit 69
+  fi
+  if [[ ! ${mount_source} =~ ^/[A-Za-z0-9._/-]+$ || ${mount_source} =~ (^|/)\.\.(/|$) ]]; then
+    echo "local PostgreSQL data mount must be one safe absolute path; refusing catalog operation" >&2
+    exit 69
+  fi
+  if ! available_bytes=$(timeout 15 df -B1 --output=avail -- "${mount_source}"); then
+    echo "could not inspect local PostgreSQL filesystem space; refusing catalog operation" >&2
+    exit 69
+  fi
+}
+
 catalog_storage_gate() {
-  local inspect_format inspect_command df_command available_gib
+  local inspect_format inspect_command df_command available_gib db_label=Almaz
 
   inspect_format='{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}'
-  printf -v inspect_command 'docker inspect --format %q %q' "${inspect_format}" "${postgres_container}"
-  if ! mount_source=$(timeout 15 ssh "${ssh_options[@]}" "${ssh_target}" \
-    "${inspect_command}"); then
-    echo "could not inspect Almaz PostgreSQL data mount; refusing catalog operation" >&2
-    exit 69
-  fi
-  if [[ ${mount_source} != /mnt/spektr/* || ! ${mount_source} =~ ^/mnt/spektr/[A-Za-z0-9._/-]+$ || ${mount_source} =~ (^|/)\.\.(/|$) ]]; then
-    echo "Almaz PostgreSQL data mount must be one safe path under /mnt/spektr/; refusing catalog operation" >&2
-    exit 69
-  fi
-  printf -v df_command 'df -B1 --output=avail %q' "${mount_source}"
-  if ! available_bytes=$(timeout 15 ssh "${ssh_options[@]}" "${ssh_target}" \
-    "${df_command}"); then
-    echo "could not inspect Almaz PostgreSQL filesystem space; refusing catalog operation" >&2
-    exit 69
+  if [[ ${db_target} == "local" ]]; then
+    db_label=Local
+    local_catalog_storage_probe
+  else
+    printf -v inspect_command 'docker inspect --format %q %q' "${inspect_format}" "${postgres_container}"
+    if ! mount_source=$(timeout 15 ssh "${ssh_options[@]}" "${ssh_target}" \
+      "${inspect_command}"); then
+      echo "could not inspect Almaz PostgreSQL data mount; refusing catalog operation" >&2
+      exit 69
+    fi
+    if [[ ${mount_source} != /mnt/spektr/* || ! ${mount_source} =~ ^/mnt/spektr/[A-Za-z0-9._/-]+$ || ${mount_source} =~ (^|/)\.\.(/|$) ]]; then
+      echo "Almaz PostgreSQL data mount must be one safe path under /mnt/spektr/; refusing catalog operation" >&2
+      exit 69
+    fi
+    printf -v df_command 'df -B1 --output=avail %q' "${mount_source}"
+    if ! available_bytes=$(timeout 15 ssh "${ssh_options[@]}" "${ssh_target}" \
+      "${df_command}"); then
+      echo "could not inspect Almaz PostgreSQL filesystem space; refusing catalog operation" >&2
+      exit 69
+    fi
   fi
   available_bytes=$(printf '%s\n' "${available_bytes}" | awk 'NR == 2 {print $1}')
   if [[ ! ${available_bytes} =~ ^[0-9]+$ || ${#available_bytes} -gt 19 || ( ${#available_bytes} -eq 19 && ${available_bytes} > 9223372036854775807 ) ]]; then
-    echo "Almaz PostgreSQL filesystem space was malformed; refusing catalog operation" >&2
+    echo "${db_label} PostgreSQL filesystem space was malformed; refusing catalog operation" >&2
     exit 69
   fi
   required_bytes=$((10#${catalog_min_free_gib} * 1024 * 1024 * 1024))
@@ -168,7 +200,7 @@ catalog_storage_gate() {
   printf 'catalog storage preflight: source=%s available=%s GiB (%s bytes) required=%s GiB\n' \
     "${mount_source}" "${available_gib}" "${available_bytes}" "${catalog_min_free_gib}" >&2
   if (( 10#${available_bytes} < required_bytes )); then
-    echo "Almaz PostgreSQL filesystem space is below the catalog rebuild threshold; refusing catalog operation" >&2
+    echo "${db_label} PostgreSQL filesystem space is below the catalog rebuild threshold; refusing catalog operation" >&2
     exit 69
   fi
 }
@@ -181,35 +213,37 @@ if [[ ${mode} == "catalog-preflight" ]]; then
   exit 0
 fi
 
-if timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
-  echo "local tunnel port ${local_db_port} is already in use; refusing an ambiguous database target" >&2
-  exit 75
-fi
+if [[ ${db_target} == "almaz-tunnel" ]]; then
+  if timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
+    echo "local tunnel port ${local_db_port} is already in use; refusing an ambiguous database target" >&2
+    exit 75
+  fi
 
-ssh \
-  -N \
-  "${ssh_options[@]}" \
-  -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 \
-  -o ServerAliveCountMax=3 \
-  -L "127.0.0.1:${local_db_port}:127.0.0.1:15435" \
-  "${ssh_target}" &
-ssh_pid=$!
+  ssh \
+    -N \
+    "${ssh_options[@]}" \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -L "127.0.0.1:${local_db_port}:127.0.0.1:15435" \
+    "${ssh_target}" &
+  ssh_pid=$!
 
-for _ in $(seq 1 50); do
-  if ! kill -0 "${ssh_pid}" 2>/dev/null; then
-    wait "${ssh_pid}"
-    echo "database tunnel exited before becoming ready" >&2
+  for _ in $(seq 1 50); do
+    if ! kill -0 "${ssh_pid}" 2>/dev/null; then
+      wait "${ssh_pid}"
+      echo "database tunnel exited before becoming ready" >&2
+      exit 69
+    fi
+    if timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
+  if ! timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
+    echo "database tunnel did not become ready" >&2
     exit 69
   fi
-  if timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
-if ! timeout 1 bash -c "</dev/tcp/127.0.0.1/${local_db_port}" >/dev/null 2>&1; then
-  echo "database tunnel did not become ready" >&2
-  exit 69
 fi
 
 docker run --rm \

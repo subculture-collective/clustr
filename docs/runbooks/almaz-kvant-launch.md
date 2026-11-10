@@ -18,6 +18,16 @@ workspace calculation is not yet one long PostgreSQL snapshot, so keep the
 crawler disabled for the first cutover publication; readers are nevertheless
 isolated by the atomic immutable-revision pointer.
 
+### Database on Kvant
+
+Since November 2026 the `reddit_cluster` database can run on Kvant itself
+(container `clustr-db`, port 15435, data in `/srv/clustr/pg17`). Set
+`CLUSTR_DB_TARGET=local` and `ALMAZ_POSTGRES_CONTAINER=clustr-db` in the
+worker environment, and point `DATABASE_URL` at `127.0.0.1:15435`. The wrapper
+then opens no SSH tunnel and runs the catalog storage gate against the local
+container's data mount. The default, `CLUSTR_DB_TARGET=almaz-tunnel`, keeps the
+tunnel behaviour described in this runbook.
+
 Do not run the production section without an explicit cutover approval, a fresh
 backup, and a pinned release image digest. Never down-migrate while a revision
 is current. Keep the legacy read and crawler flags for the full revision
