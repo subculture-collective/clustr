@@ -3,6 +3,11 @@ name: Performance Benchmarks
 on:
   push:
     branches: [ main ]
+    # The suite runs the frontend dev server against mocked API routes and
+    # generated fixtures, so only frontend or workflow changes can move it.
+    paths:
+      - 'frontend/**'
+      - '.gitea/workflows/benchmark.yml'
   workflow_dispatch: # Allow manual trigger
 
 permissions:
@@ -10,7 +15,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   benchmark:
@@ -58,13 +63,6 @@ jobs:
         if: steps.run_benchmarks.outcome == 'failure'
         run: |
           echo "::warning::Benchmarks failed to complete. Results may be incomplete."
-
-      - name: Download baseline
-        uses: actions/download-artifact@v3
-        continue-on-error: true
-        with:
-          name: benchmark-baseline
-          path: frontend/benchmarks/results/
 
       - name: Compare with baseline
         working-directory: ./frontend
@@ -125,35 +123,3 @@ jobs:
         run: |
           echo "::error::Performance regression detected! Check the benchmark comparison for details."
           exit 1
-
-  # Store baseline on main branch
-  store-baseline:
-    name: Store Baseline
-    timeout-minutes: 30
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: benchmark
-    
-    steps:
-      - name: Download benchmark results
-        uses: actions/download-artifact@v3
-        with:
-          name: benchmark-results
-          path: frontend/benchmarks/results/
-
-      - name: Copy latest to baseline
-        run: |
-          cd frontend/benchmarks/results
-          if [ -f benchmark-latest.json ]; then
-            cp benchmark-latest.json baseline.json
-            echo "✅ Updated baseline from latest results"
-          else
-            echo "⚠️  No benchmark results to store"
-          fi
-
-      - name: Upload new baseline
-        uses: actions/upload-artifact@v3
-        with:
-          name: benchmark-baseline
-          path: frontend/benchmarks/results/baseline.json
-          retention-days: 365

@@ -109,34 +109,30 @@ git add benchmarks/results/baseline.json
 git commit -m "chore: update performance baseline"
 ```
 
-The committed `baseline.json` is the one CI compares against: pull request runs cannot read the `benchmark-baseline` artifact that main pushes upload. CI runs on two Gitea runners of different speeds (Kvant and Kuznya), so a copy of one run's results makes the other runner fail. The `gitea-2cpu-v2` baseline was built from the per-run tables that CI posted on pull requests between November 3 and 6, 2026: render time is the slower runner's 75th percentile, FPS and parse time its median, and memory the median across both runners. Check a new baseline by passing earlier runs to `npx tsx benchmarks/compare.ts <baseline> <run>`.
+The committed `baseline.json` is the only baseline CI compares against. CI runs on two Gitea runners of different speeds (Kvant and Kuznya), so a copy of one run's results makes the other runner fail. The `gitea-2cpu-v2` baseline was built from the per-run tables that CI posted on pull requests between November 3 and 6, 2026: render time is the slower runner's 75th percentile, FPS and parse time its median, and memory the median across both runners. Check a new baseline by passing earlier runs to `npx tsx benchmarks/compare.ts <baseline> <run>`.
 
 ## CI Integration
 
-Benchmarks run automatically in GitHub Actions on:
-- Push to `main` branch
-- Pull requests to `main`
+Benchmarks run automatically on:
+- Pushes to any branch except `main`, in the public GitHub mirror's `Mirror CI` workflow (job `Run Performance Benchmarks`)
+- Pushes to `main` that change `frontend/` or the workflow, in Gitea's `Performance Benchmarks` workflow
 - Manual workflow dispatch
 
 ### CI Workflow
 
 1. **Run Benchmarks**: Executes benchmark suite on all fixture sizes
-2. **Upload Results**: Stores results as artifacts (90-day retention)
-3. **Compare with Baseline**: Downloads stored baseline and compares
-4. **Report Results**: Adds comment to PR with benchmark table
-5. **Fail on Regression**: Returns exit code 1 if performance degraded
-6. **Store Baseline** (main only): Updates baseline artifact on main branch
+2. **Upload Results**: Stores results as artifacts (90 days on Gitea, 1 day on GitHub)
+3. **Compare with Baseline**: Compares against the committed `baseline.json`
+4. **Fail on Regression**: Returns exit code 1 if performance degraded
 
 ### Viewing CI Results
 
 **In Pull Requests:**
-- Check the "Performance Benchmarks" status check
-- View benchmark table in automated PR comment
-- Click "Details" to see full job summary with comparison
+- Check the `GitHub CI / Mirror CI gate` status, which requires the benchmark job
+- Open the mirror's `Mirror CI` run to see the comparison in the job log
 
 **On Main Branch:**
-- Baseline is automatically updated from latest results
-- New baseline stored as artifact for future comparisons
+- Open the Gitea `Performance Benchmarks` run; the baseline changes only when a commit updates `baseline.json`
 
 ### Job Summaries
 

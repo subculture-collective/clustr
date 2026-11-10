@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# This workflow deploys: serialize runs per ref and never cancel one in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test-backend:
     name: Test Backend
@@ -358,41 +363,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [test-backend]
-
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [server, crawler, precalculate, migrate]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get Docker file name
-        id: dockerfile
+      - name: Build every backend image and scan the server image
+        shell: bash
+        env:
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: |
-          if [ "${{ matrix.component }}" = "server" ]; then
-            echo "file=Dockerfile" >> "$GITHUB_OUTPUT"
-          else
-            echo "file=Dockerfile.${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+          # One job builds all four images in sequence (they share the Go module
+          # layers); every image is still attempted and any failure fails the job.
+          failed=()
+          for component in server crawler precalculate migrate; do
+            if [ "$component" = server ]; then file=Dockerfile; else file="Dockerfile.$component"; fi
+            echo "::group::Build $component"
+            if ! docker build --pull \
+              --file "./backend/$file" \
+              --tag "reddit-cluster-$component:${{ github.sha }}" \
+              --build-arg "VERSION=${{ github.ref_name }}" \
+              --build-arg "COMMIT=${{ github.sha }}" \
+              --build-arg "BUILD_TIME=$BUILD_TIME" \
+              ./backend; then
+              failed+=("$component build")
+            elif [ "$component" = server ] && ! docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
+              --severity CRITICAL,HIGH --format table "reddit-cluster-$component:${{ github.sha }}"; then
+              failed+=("$component scan")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            printf '::error::%s failed\n' "${failed[@]}"
+            exit 1
           fi
-
-      - name: Build Docker image
-        run: |
-          docker build --pull \
-            --file "./backend/${{ steps.dockerfile.outputs.file }}" \
-            --tag "reddit-cluster-${{ matrix.component }}:${{ github.sha }}" \
-            --build-arg "VERSION=${{ github.ref_name }}" \
-            --build-arg "COMMIT=${{ github.sha }}" \
-            --build-arg "BUILD_TIME=${{ github.event.head_commit.timestamp }}" \
-            ./backend
-
-      - name: Scan the built server image
-        if: matrix.component == 'server'
-        run: |
-          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:0.74.0 image --exit-code 1 --ignore-unfixed \
-            --severity CRITICAL,HIGH --format table reddit-cluster-${{ matrix.component }}:${{ github.sha }}
 
   build-frontend-image:
     name: Build Frontend Docker Image
