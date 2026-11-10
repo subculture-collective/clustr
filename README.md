@@ -58,16 +58,19 @@ make dev-backend           # API on port 8000 (API_PORT)
 make dev-frontend          # Vite dev server; proxies /api to localhost:8000
 ```
 
-Queue a crawl with the admin token, then build the graph:
+Queue a crawl, then build the graph. The crawler and precalculation read only
+the environment, so these commands load `backend/.env` with the `godotenv` tool
+from the backend's Go module:
 
 ```bash
-curl -X POST http://localhost:8000/api/crawl \
+cd backend
+alias withenv='go run github.com/joho/godotenv/cmd/godotenv -f .env'
+withenv sh -c 'curl -X POST http://localhost:8000/api/crawl \
   -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"subreddit": "AskReddit"}'
-set -a; . backend/.env; set +a   # the crawler and precalculate read only the environment
-(cd backend && go run ./cmd/crawler)        # keep running in another terminal
-(cd backend && go run ./cmd/precalculate)   # one-shot graph build
+  -d "{\"subreddit\": \"AskReddit\"}"'
+withenv go run ./cmd/crawler        # keep running in another terminal
+withenv go run ./cmd/precalculate   # one-shot graph build
 ```
 
 Tests and checks:
