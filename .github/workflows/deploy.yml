@@ -39,6 +39,9 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:github-ci
           version: latest
+          # The tailnet resolver is a LAN address this runner cannot reach;
+          # keep the runner's own DNS so image and package pulls resolve.
+          args: --accept-dns=false
       - name: Prepare the deploy key
         env:
           DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
