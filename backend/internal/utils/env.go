@@ -19,10 +19,21 @@ func GetEnvAsBool(key string, defaultVal bool) bool {
 	}
 }
 
+// Atoi32 parses a decimal integer and rejects values outside the int32 range,
+// so the result can be converted to int32 (database limits, offsets and IDs)
+// without wrapping.
+func Atoi32(s string) (int, error) {
+	n, err := strconv.ParseInt(s, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // GetEnvAsInt retrieves an environment variable as an integer with a default fallback.
 func GetEnvAsInt(name string, defaultVal int) int {
 	if valStr := os.Getenv(name); valStr != "" {
-		if val, err := strconv.Atoi(valStr); err == nil {
+		if val, err := Atoi32(valStr); err == nil {
 			return val
 		}
 	}

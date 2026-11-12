@@ -272,9 +272,9 @@ FROM subreddit_relationships WHERE overlap_count>0 AND source_subreddit_id<>targ
 }
 
 func mustSubredditID(entityID string) int {
-	value, err := strconv.Atoi(entityID[len("subreddit_"):])
+	value, err := strconv.ParseInt(entityID[len("subreddit_"):], 10, 32)
 	if err != nil {
 		panic(fmt.Sprintf("layout body %q is not a subreddit id", entityID))
 	}
-	return value
+	return int(value)
 }

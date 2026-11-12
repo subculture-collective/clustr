@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -78,13 +78,13 @@ func (h *AdminJobsHandler) ListJobsByStatus(w http.ResponseWriter, r *http.Reque
 	offset := 0
 
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l, err := utils.Atoi32(limitStr); err == nil && l > 0 {
 			limit = l
 		}
 	}
 
 	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+		if o, err := utils.Atoi32(offsetStr); err == nil && o >= 0 {
 			offset = o
 		}
 	}
@@ -144,7 +144,7 @@ func (h *AdminJobsHandler) UpdateJobStatus(w http.ResponseWriter, r *http.Reques
 	vars := mux.Vars(r)
 	jobIDStr := vars["id"]
 
-	jobID, err := strconv.Atoi(jobIDStr)
+	jobID, err := utils.Atoi32(jobIDStr)
 	if err != nil {
 		http.Error(w, "Invalid job ID", http.StatusBadRequest)
 		return
@@ -207,7 +207,7 @@ func (h *AdminJobsHandler) UpdateJobPriority(w http.ResponseWriter, r *http.Requ
 	vars := mux.Vars(r)
 	jobIDStr := vars["id"]
 
-	jobID, err := strconv.Atoi(jobIDStr)
+	jobID, err := utils.Atoi32(jobIDStr)
 	if err != nil {
 		http.Error(w, "Invalid job ID", http.StatusBadRequest)
 		return
@@ -258,7 +258,7 @@ func (h *AdminJobsHandler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	jobIDStr := vars["id"]
 
-	jobID, err := strconv.Atoi(jobIDStr)
+	jobID, err := utils.Atoi32(jobIDStr)
 	if err != nil {
 		http.Error(w, "Invalid job ID", http.StatusBadRequest)
 		return
@@ -404,7 +404,7 @@ func (h *AdminJobsHandler) BoostJobPriority(w http.ResponseWriter, r *http.Reque
 	vars := mux.Vars(r)
 	jobIDStr := vars["id"]
 
-	jobID, err := strconv.Atoi(jobIDStr)
+	jobID, err := utils.Atoi32(jobIDStr)
 	if err != nil {
 		http.Error(w, "Invalid job ID", http.StatusBadRequest)
 		return

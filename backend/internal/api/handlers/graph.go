@@ -20,6 +20,7 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -335,7 +336,7 @@ func atoiSafe(s string) int {
 	if s == "" {
 		return 0
 	}
-	if iv, err := strconv.Atoi(s); err == nil {
+	if iv, err := utils.Atoi32(s); err == nil {
 		return iv
 	}
 	return 0
@@ -410,7 +411,7 @@ func parseIntDefault(s string, def int) int {
 	if s == "" {
 		return def
 	}
-	if v, err := strconv.Atoi(s); err == nil {
+	if v, err := utils.Atoi32(s); err == nil {
 		return v
 	}
 	return def

@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 )
 
 // RevisionOptions bounds one immutable explorer artifact.  The caps are
@@ -41,7 +41,7 @@ func DefaultRevisionOptions() RevisionOptions {
 }
 
 func positiveEnv(name string, fallback int) int {
-	value, err := strconv.Atoi(os.Getenv(name))
+	value, err := utils.Atoi32(os.Getenv(name))
 	if err != nil || value < 1 {
 		return fallback
 	}
@@ -49,7 +49,7 @@ func positiveEnv(name string, fallback int) int {
 }
 
 func nonNegativeEnv(name string, fallback int) int {
-	value, err := strconv.Atoi(os.Getenv(name))
+	value, err := utils.Atoi32(os.Getenv(name))
 	if err != nil || value < 0 {
 		return fallback
 	}

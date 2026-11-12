@@ -21,6 +21,7 @@ import (
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -254,7 +255,7 @@ GROUP BY author_id,subreddit_id`)
 	// Determine workers
 	workers := 4
 	if wStr := os.Getenv("PRECALC_ACTIVITY_WORKERS"); wStr != "" {
-		if w, err := strconv.Atoi(wStr); err == nil && w > 0 {
+		if w, err := utils.Atoi32(wStr); err == nil && w > 0 {
 			workers = w
 		}
 	} else if p := runtime.GOMAXPROCS(0); p > 0 && p < workers {
@@ -535,13 +536,13 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 	// Configurable node batch size / progress interval via env
 	nodeBatchSize := 1000
 	if v := os.Getenv("GRAPH_NODE_BATCH_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := utils.Atoi32(v); err == nil && n > 0 {
 			nodeBatchSize = n
 		}
 	}
 	progressInterval := 10000
 	if v := os.Getenv("GRAPH_PROGRESS_INTERVAL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := utils.Atoi32(v); err == nil && n > 0 {
 			progressInterval = n
 		}
 	}
@@ -662,7 +663,7 @@ func (s *Service) PrecalculateGraphDataWithMode(ctx context.Context, fullRebuild
 	var pendingNodes []db.BulkInsertGraphNodeParams
 	linkBatchSize := 2000
 	if v := os.Getenv("GRAPH_LINK_BATCH_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := utils.Atoi32(v); err == nil && n > 0 {
 			linkBatchSize = n
 		}
 	}

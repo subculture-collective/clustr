@@ -9,6 +9,7 @@ import (
 
 	"github.com/onnwee/reddit-cluster-map/backend/internal/admin"
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"github.com/sqlc-dev/pqtype"
 )
 
@@ -204,13 +205,13 @@ func (h *AdminSettingsHandler) GetAuditLog(w http.ResponseWriter, r *http.Reques
 	offset := 0
 
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l, err := utils.Atoi32(limitStr); err == nil && l > 0 {
 			limit = l
 		}
 	}
 
 	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+		if o, err := utils.Atoi32(offsetStr); err == nil && o >= 0 {
 			offset = o
 		}
 	}
@@ -245,7 +246,7 @@ func getIntSetting(ctx context.Context, q *db.Queries, key string, def int) int 
 	if val == "" {
 		return def
 	}
-	if i, err := strconv.Atoi(val); err == nil {
+	if i, err := utils.Atoi32(val); err == nil {
 		return i
 	}
 	return def
