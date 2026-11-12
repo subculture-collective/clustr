@@ -530,7 +530,7 @@ ORDER BY COALESCE((evidence_metrics->>'overview_rank')::int,2147483647),size DES
 	if catalog.Valid {
 		payload.SpatialCatalog = catalog.Int64
 	}
-	ids := make([]string, 0, limit)
+	ids := make([]string, 0)
 	for rows.Next() {
 		var n revisionNode
 		if err := rows.Scan(&n.ID, &n.Name, &n.DisplayName, &n.EvidenceLabel, &n.MacroGroupID, &n.PrimaryColor,
@@ -750,7 +750,7 @@ ORDER BY value DESC,id OFFSET $8 LIMIT $9`, columns, table, key, typeFilter)
 	if catalog.Valid {
 		payload.SpatialCatalog = catalog.Int64
 	}
-	ids := make([]string, 0, limit)
+	ids := make([]string, 0)
 	for rows.Next() {
 		var node revisionNode
 		if catalog.Valid {
@@ -1084,7 +1084,7 @@ ORDER BY selected.priority DESC,n.value DESC,n.id`, columns)
 	}
 	defer rows.Close()
 	payload := scenePayload{RevisionID: id, SpatialCatalog: catalog.Int64, Scope: expansion.Name, RootID: entityID, Nodes: []revisionNode{}, Links: []revisionLink{}}
-	ids := make([]string, 0, limit)
+	ids := make([]string, 0)
 	childCount := 0
 	for rows.Next() {
 		node, scanErr := scanSpatialNode(rows)
@@ -1246,7 +1246,7 @@ func (h *RevisionHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	results := make([]spatialSearchResult, 0, limit)
+	results := make([]spatialSearchResult, 0)
 	for rows.Next() {
 		var result spatialSearchResult
 		var kind string

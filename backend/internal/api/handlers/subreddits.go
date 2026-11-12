@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 )
 
 // SubredditsLister abstracts listing with pagination for testability.
@@ -21,12 +21,12 @@ func GetSubreddits(q SubredditsLister) http.HandlerFunc {
 		offset := int32(0)
 
 		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n, err := utils.Atoi32(v); err == nil && n > 0 {
 				limit = int32(n)
 			}
 		}
 		if v := r.URL.Query().Get("offset"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			if n, err := utils.Atoi32(v); err == nil && n >= 0 {
 				offset = int32(n)
 			}
 		}
