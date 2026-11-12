@@ -167,7 +167,7 @@ const stats = simulation.getStats();
 console.log('Using worker:', stats.useWorker);
 ```
 
-**See [Web Worker Simulation Documentation](../../docs/WEB_WORKER_SIMULATION.md) for details.**
+**See [Web Worker Simulation Documentation](../../../docs/WEB_WORKER_SIMULATION.md) for details.**
 
 #### 4. `LinkRenderer.ts`
 
@@ -480,4 +480,4 @@ Notable differences:
 
 - [THREE.InstancedMesh Documentation](https://threejs.org/docs/#api/en/objects/InstancedMesh)
 - [d3-force Documentation](https://d3js.org/d3-force)
-- [Original Issue #139](https://github.com/subculture-collective/reddit-cluster-map/issues/139)
+- [Original Issue #139](https://github.com/subculture-collective/clustr/issues/139)

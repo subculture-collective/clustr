@@ -76,8 +76,8 @@ Edit `CHANGELOG.md` and move items from `[Unreleased]` to a new version section:
 - Corrected graph layout calculations
 - Resolved memory leaks in graph rendering
 
-[Unreleased]: https://github.com/subculture-collective/reddit-cluster-map/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/subculture-collective/reddit-cluster-map/releases/tag/v1.0.0
+[Unreleased]: https://github.com/subculture-collective/clustr/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/subculture-collective/clustr/releases/tag/v1.0.0
 ```
 
 ### Step 5: Commit Changes
@@ -120,10 +120,10 @@ Once the tag is pushed, GitHub Actions automatically:
 2. **Publish Workflow** (`.github/workflows/publish.yml`):
    - Triggers on the `v1.0.0` tag
    - Builds Docker images for all services:
-     - `ghcr.io/subculture-collective/reddit-cluster-map-server`
-     - `ghcr.io/subculture-collective/reddit-cluster-map-crawler`
-     - `ghcr.io/subculture-collective/reddit-cluster-map-precalculate`
-     - `ghcr.io/subculture-collective/reddit-cluster-map-frontend`
+     - `ghcr.io/subculture-collective/clustr-server`
+     - `ghcr.io/subculture-collective/clustr-crawler`
+     - `ghcr.io/subculture-collective/clustr-precalculate`
+     - `ghcr.io/subculture-collective/clustr-frontend`
    - Tags images with:
      - `v1.0.0` (version tag)
      - `v1.0` (minor version)
@@ -135,13 +135,13 @@ Once the tag is pushed, GitHub Actions automatically:
 
 ```bash
 # Check GitHub Releases page
-open https://github.com/subculture-collective/reddit-cluster-map/releases
+open https://github.com/subculture-collective/clustr/releases
 
 # Pull and verify Docker images
-docker pull ghcr.io/subculture-collective/reddit-cluster-map-server:v1.0.0
-docker pull ghcr.io/subculture-collective/reddit-cluster-map-crawler:v1.0.0
-docker pull ghcr.io/subculture-collective/reddit-cluster-map-precalculate:v1.0.0
-docker pull ghcr.io/subculture-collective/reddit-cluster-map-frontend:v1.0.0
+docker pull ghcr.io/subculture-collective/clustr-server:v1.0.0
+docker pull ghcr.io/subculture-collective/clustr-crawler:v1.0.0
+docker pull ghcr.io/subculture-collective/clustr-precalculate:v1.0.0
+docker pull ghcr.io/subculture-collective/clustr-frontend:v1.0.0
 
 # Verify image tags
 docker images | grep reddit-cluster-map
@@ -241,7 +241,7 @@ git branch -d hotfix/1.0.1
 
 ```bash
 # Check workflow status
-open https://github.com/subculture-collective/reddit-cluster-map/actions
+open https://github.com/subculture-collective/clustr/actions
 
 # Common issues:
 # - Permissions: Ensure workflow has write permissions
@@ -288,4 +288,4 @@ git push origin :refs/tags/v1.0.0
 - [CHANGELOG.md](../CHANGELOG.md) - Project changelog
 - [VERSION](../VERSION) - Current version number
 - [CONTRIBUTING.md](../CONTRIBUTING.md#release-process) - Full release process documentation
-- [CI-CD.md](../CI-CD.md) - CI/CD pipeline documentation
+- [CI-CD.md](CI-CD.md) - CI/CD pipeline documentation

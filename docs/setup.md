@@ -13,8 +13,8 @@ This guide gets you from zero to a running stack with detailed explanations of t
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/subculture-collective/reddit-cluster-map.git
-   cd reddit-cluster-map
+   git clone https://github.com/subculture-collective/clustr.git
+   cd clustr
    ```
 
 2. **Quick setup** (recommended):

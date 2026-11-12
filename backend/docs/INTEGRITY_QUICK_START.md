@@ -125,5 +125,5 @@ fi
 ## See Also
 
 - [Full Documentation](DATA_INTEGRITY.md) - Comprehensive guide
-- [Makefile](../Makefile) - All available targets
+- [Makefile](../../Makefile) - All available targets
 - [Maintenance Script](../scripts/maintenance.sql) - SQL operations

@@ -271,8 +271,8 @@ Edit `compare.ts` to adjust failure thresholds:
 
 - [Testing Guide](../TESTING.md) - Unit and E2E testing
 - [Bundle Size](../BUNDLE_SIZE.md) - Bundle size monitoring
-- [Issue #143](https://github.com/subculture-collective/reddit-cluster-map/issues/143) - Epic: Testing, CI/CD & Quality
-- [Issue #138](https://github.com/subculture-collective/reddit-cluster-map/issues/138) - v2.0 Roadmap
+- [Issue #143](https://github.com/subculture-collective/clustr/issues/143) - Epic: Testing, CI/CD & Quality
+- [Issue #138](https://github.com/subculture-collective/clustr/issues/138) - v2.0 Roadmap
 
 ## Support
 

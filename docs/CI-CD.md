@@ -57,10 +57,10 @@ The project uses GitHub Actions for continuous integration, deployment, and rele
   - Same tagging strategy as backend
 
 **Image Naming:**
-- Backend Server: `ghcr.io/onnwee/reddit-cluster-map-server`
-- Crawler: `ghcr.io/onnwee/reddit-cluster-map-crawler`
-- Precalculate: `ghcr.io/onnwee/reddit-cluster-map-precalculate`
-- Frontend: `ghcr.io/onnwee/reddit-cluster-map-frontend`
+- Backend Server: `ghcr.io/subculture-collective/clustr-server`
+- Crawler: `ghcr.io/subculture-collective/clustr-crawler`
+- Precalculate: `ghcr.io/subculture-collective/clustr-precalculate`
+- Frontend: `ghcr.io/subculture-collective/clustr-frontend`
 
 ### Release Workflow
 
@@ -170,13 +170,13 @@ docker build -t reddit-cluster-frontend:local frontend/
 
 ```bash
 # Pull latest images
-docker pull ghcr.io/onnwee/reddit-cluster-map-server:latest
-docker pull ghcr.io/onnwee/reddit-cluster-map-crawler:latest
-docker pull ghcr.io/onnwee/reddit-cluster-map-precalculate:latest
-docker pull ghcr.io/onnwee/reddit-cluster-map-frontend:latest
+docker pull ghcr.io/subculture-collective/clustr-server:latest
+docker pull ghcr.io/subculture-collective/clustr-crawler:latest
+docker pull ghcr.io/subculture-collective/clustr-precalculate:latest
+docker pull ghcr.io/subculture-collective/clustr-frontend:latest
 
 # Pull specific version
-docker pull ghcr.io/onnwee/reddit-cluster-map-server:v1.0.0
+docker pull ghcr.io/subculture-collective/clustr-server:v1.0.0
 ```
 
 ## Commit Message Conventions

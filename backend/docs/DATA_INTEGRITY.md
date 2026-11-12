@@ -259,9 +259,9 @@ func CleanStaleData(svc *integrity.Service, days int) error {
 
 ## Related Documentation
 
-- [Setup Guide](setup.md) - Initial database setup
-- [Developer Guide](developer-guide.md) - Development workflows
-- [Backup Guide](../Makefile) - Backup operations (see ##@ Backups section)
+- [Setup Guide](../../docs/setup.md) - Initial database setup
+- [Developer Guide](../../docs/developer-guide.md) - Development workflows
+- [Backup Guide](../../Makefile) - Backup operations (see ##@ Backups section)
 
 ## Support
 

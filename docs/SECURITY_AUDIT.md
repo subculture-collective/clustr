@@ -530,7 +530,7 @@ Based on OWASP Top 10:
 ## Contact
 
 For security issues, please create a private security advisory on GitHub at:
-https://github.com/subculture-collective/reddit-cluster-map/security/advisories/new
+https://github.com/subculture-collective/clustr/security/advisories/new
 
 Alternatively, open a confidential issue in the repository.
 
