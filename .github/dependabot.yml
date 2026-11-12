@@ -26,6 +26,14 @@ updates:
     # Always create PRs for security updates immediately
     allow:
       - dependency-type: "all"
+    # Pull requests merge themselves once CI passes, so leave upgrades that
+    # need a code migration to a person.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # 0.46 removes Event.Extra and Scope.SetExtra, which errorreporting uses.
+      - dependency-name: "github.com/getsentry/sentry-go"
+        versions: [">=0.46.0"]
 
   # Frontend npm dependencies
   - package-ecosystem: "npm"
@@ -51,6 +59,8 @@ updates:
       - dependency-type: "all"
     # Rendering libraries change the visual snapshots; update them by hand.
     ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "three"
       - dependency-name: "@types/three"
       - dependency-name: "troika-three-text"
@@ -78,6 +88,10 @@ updates:
     open-pull-requests-limit: 3
     labels:
       - "dependencies"
+    # The Go version is pinned in go.mod and the workflows; move them together.
+    ignore:
+      - dependency-name: "golang"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "docker"
     directory: "/frontend"
@@ -89,3 +103,7 @@ updates:
     open-pull-requests-limit: 3
     labels:
       - "dependencies"
+    # CI tests on the Node version in the workflows; move them together.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
