@@ -151,7 +151,7 @@ services:
 
     prometheus:
         container_name: reddit-cluster-prometheus
-        image: prom/prometheus:latest
+        image: prom/prometheus:v3.16.0
         restart: unless-stopped
         volumes:
             - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -169,7 +169,7 @@ services:
 
     grafana:
         container_name: reddit-cluster-grafana
-        image: grafana/grafana:latest
+        image: grafana/grafana:13.3.1
         restart: unless-stopped
         volumes:
             - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
