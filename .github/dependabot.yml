@@ -1,5 +1,11 @@
-# Dependabot configuration for automated dependency updates and security scanning
-# See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Dependabot version updates, kept quiet on purpose.
+#
+# Pull requests merge themselves once CI passes, so each ecosystem gets at most
+# one grouped pull request a month, for minor and patch updates of direct
+# dependencies only. Major versions are left to a person. Security updates are
+# separate from this file and still open as soon as an advisory is published.
+#
+# See: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 version: 2
 updates:
@@ -7,15 +13,13 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/backend"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "go"
-    # Group non-security updates to reduce PR noise
     groups:
       go-dependencies:
         patterns:
@@ -23,11 +27,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    # Always create PRs for security updates immediately
-    allow:
-      - dependency-type: "all"
-    # Pull requests merge themselves once CI passes, so leave upgrades that
-    # need a code migration to a person.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
@@ -39,15 +38,13 @@ updates:
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "javascript"
-    # Group non-security updates
     groups:
       npm-dependencies:
         patterns:
@@ -55,55 +52,57 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    allow:
-      - dependency-type: "all"
-    # Rendering libraries change the visual snapshots; update them by hand.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Rendering libraries change the visual snapshots; update them by hand.
       - dependency-name: "three"
       - dependency-name: "@types/three"
       - dependency-name: "troika-three-text"
 
-  # GitHub Actions dependencies
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "UTC"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Docker base images
   - package-ecosystem: "docker"
-    directory: "/backend"
+    directories:
+      - "/backend"
+      - "/frontend"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "UTC"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
-    # The Go version is pinned in go.mod and the workflows; move them together.
+    groups:
+      docker-images:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
-      - dependency-name: "golang"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-
-  - package-ecosystem: "docker"
-    directory: "/frontend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "UTC"
-    open-pull-requests-limit: 3
-    labels:
-      - "dependencies"
-    # CI tests on the Node version in the workflows; move them together.
-    ignore:
-      - dependency-name: "node"
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The Go version is pinned in go.mod and the workflows; move them together.
+      - dependency-name: "golang"
+        update-types: ["version-update:semver-minor"]
