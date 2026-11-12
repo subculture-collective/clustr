@@ -11,11 +11,11 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/authstore"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/secrets"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/authstore"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/secrets"
 )
 
 // AuthHandlers bundles dependencies for OAuth endpoints.

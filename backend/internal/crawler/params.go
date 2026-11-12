@@ -3,7 +3,7 @@ package crawler
 import (
 	"database/sql"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // ToUpsertPostParams converts a Post into UpsertPostParams.

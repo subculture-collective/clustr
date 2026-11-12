@@ -198,7 +198,7 @@ The crawler now classifies Reddit API errors into specific types:
 ### Usage
 
 ```go
-import "github.com/onnwee/reddit-cluster-map/backend/internal/redditapi"
+import "github.com/subculture-collective/clustr/backend/internal/redditapi"
 
 resp, err := client.Get(url)
 if err != nil {

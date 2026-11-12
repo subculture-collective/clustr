@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // ErrorCode represents a structured error code

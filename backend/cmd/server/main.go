@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/api"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/server"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/subculture-collective/clustr/backend/internal/api"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/errorreporting"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/server"
+	"github.com/subculture-collective/clustr/backend/internal/tracing"
 )
 
 func main() {

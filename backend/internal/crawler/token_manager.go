@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/httpx"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/secrets"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/httpx"
+	"github.com/subculture-collective/clustr/backend/internal/secrets"
 )
 
 // tokenManager handles OAuth token lifecycle with proactive refresh.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 // Config holds application configuration derived from environment variables.

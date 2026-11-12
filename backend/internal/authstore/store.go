@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // Account is a minimal representation of a stored OAuth account.

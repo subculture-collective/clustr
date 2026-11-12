@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // Get returns the value for a key or empty string if not set.

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/affinity"
+	"github.com/subculture-collective/clustr/backend/internal/affinity"
 )
 
 func main() {

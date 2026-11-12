@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 func GetPosts(q *db.Queries) http.HandlerFunc {

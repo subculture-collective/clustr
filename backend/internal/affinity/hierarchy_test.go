@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/affinity"
+	"github.com/subculture-collective/clustr/backend/internal/affinity"
 )
 
 func TestWeightedMultiplexPartitionIsDeterministic(t *testing.T) {

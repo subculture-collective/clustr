@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 func TestIntegration_SpatialQueries_BoundingBox(t *testing.T) {

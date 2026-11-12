@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // Service provides data integrity operations

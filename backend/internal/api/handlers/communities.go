@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
 )
 
 // CommunityDataReader defines DB operations for communities API.

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // EnsureJob enqueues a job for subredditID if absent, or resets to queued if failed/stale.

@@ -1,4 +1,4 @@
-module github.com/onnwee/reddit-cluster-map/backend
+module github.com/subculture-collective/clustr/backend
 
 go 1.26.11
 

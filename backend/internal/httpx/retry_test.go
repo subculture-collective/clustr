@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/config"
 )
 
 func TestDoWithRetry_MaxRetriesExceeded(t *testing.T) {

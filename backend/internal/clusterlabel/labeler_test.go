@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/clusterlabel"
+	"github.com/subculture-collective/clustr/backend/internal/clusterlabel"
 )
 
 func TestNoProviderPublishesDeterministicEvidenceLabel(t *testing.T) {

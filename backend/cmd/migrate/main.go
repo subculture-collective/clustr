@@ -10,7 +10,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
+	"github.com/subculture-collective/clustr/backend/internal/migrations"
 )
 
 var (

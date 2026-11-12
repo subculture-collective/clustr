@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 // Comment holds comment data from a Reddit thread

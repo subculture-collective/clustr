@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/config"
 )
 
 func TestCatalogProductionRequiresStrongCursorSecret(t *testing.T) {

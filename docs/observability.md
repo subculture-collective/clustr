@@ -169,7 +169,7 @@ Panics in HTTP handlers are automatically:
 ### Manual Error Reporting
 
 ```go
-import "github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
+import "github.com/subculture-collective/clustr/backend/internal/errorreporting"
 
 // Capture an error
 errorreporting.CaptureError(err)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/httpx"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/httpx"
 )
 
 var httpClient = &http.Client{Timeout: config.Load().HTTPTimeout}

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/config"
 )
 
 // Health returns a simple JSON payload to indicate the API is alive.

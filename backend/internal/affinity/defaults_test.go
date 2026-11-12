@@ -3,7 +3,7 @@ package affinity_test
 import (
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/affinity"
+	"github.com/subculture-collective/clustr/backend/internal/affinity"
 )
 
 func TestHistoricalDefaultPriorOnlyChangesRepresentativeScore(t *testing.T){

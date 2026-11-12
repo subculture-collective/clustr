@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 // RevisionOptions bounds one immutable explorer artifact.  The caps are

@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // LogPprofAccess logs profiling endpoint access attempts for security monitoring.

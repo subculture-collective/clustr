@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
 )
 
 // Note: In Go 1.20+, the global random number generator is automatically seeded.

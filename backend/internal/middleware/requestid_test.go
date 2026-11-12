@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 func TestGenerateRequestID(t *testing.T) {

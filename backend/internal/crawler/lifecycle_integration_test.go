@@ -10,8 +10,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 func TestIntegration_CrawlRequestRecursAfterSuccess(t *testing.T) {

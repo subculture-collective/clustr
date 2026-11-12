@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // fakeStore implements GraphStore for testing without a real DB.

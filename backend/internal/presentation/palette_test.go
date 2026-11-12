@@ -3,7 +3,7 @@ package presentation_test
 import (
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/presentation"
+	"github.com/subculture-collective/clustr/backend/internal/presentation"
 )
 
 func TestBridgeRequiresBothAbsoluteAndRelativeAffinity(t *testing.T) {

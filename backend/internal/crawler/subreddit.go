@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/config"
 )
 
 // SubredditInfo holds metadata about a subreddit

@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // Community represents a detected community with its members

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/integrity"
+	"github.com/subculture-collective/clustr/backend/internal/integrity"
 )
 
 // ExampleService_CheckAllIntegrity demonstrates how to check data integrity

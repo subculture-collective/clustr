@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/tracing"
 	"go.opentelemetry.io/otel/attribute"
 )
 
