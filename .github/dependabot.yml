@@ -12,11 +12,8 @@ updates:
       time: "09:00"
       timezone: "UTC"
     open-pull-requests-limit: 5
-    reviewers:
-      - "subculture-collective/maintainers"
     labels:
       - "dependencies"
-      - "backend"
       - "go"
     # Group non-security updates to reduce PR noise
     groups:
@@ -29,8 +26,6 @@ updates:
     # Always create PRs for security updates immediately
     allow:
       - dependency-type: "all"
-    # Increase priority for security updates
-    target-branch: "develop"
 
   # Frontend npm dependencies
   - package-ecosystem: "npm"
@@ -41,12 +36,9 @@ updates:
       time: "09:00"
       timezone: "UTC"
     open-pull-requests-limit: 5
-    reviewers:
-      - "subculture-collective/maintainers"
     labels:
       - "dependencies"
-      - "frontend"
-      - "npm"
+      - "javascript"
     # Group non-security updates
     groups:
       npm-dependencies:
@@ -57,7 +49,11 @@ updates:
           - "patch"
     allow:
       - dependency-type: "all"
-    target-branch: "develop"
+    # Rendering libraries change the visual snapshots; update them by hand.
+    ignore:
+      - dependency-name: "three"
+      - dependency-name: "@types/three"
+      - dependency-name: "troika-three-text"
 
   # GitHub Actions dependencies
   - package-ecosystem: "github-actions"
@@ -68,12 +64,8 @@ updates:
       time: "09:00"
       timezone: "UTC"
     open-pull-requests-limit: 3
-    reviewers:
-      - "subculture-collective/maintainers"
     labels:
       - "dependencies"
-      - "github-actions"
-    target-branch: "develop"
 
   # Docker base images
   - package-ecosystem: "docker"
@@ -84,12 +76,8 @@ updates:
       time: "09:00"
       timezone: "UTC"
     open-pull-requests-limit: 3
-    reviewers:
-      - "subculture-collective/maintainers"
     labels:
       - "dependencies"
-      - "docker"
-    target-branch: "develop"
 
   - package-ecosystem: "docker"
     directory: "/frontend"
@@ -99,9 +87,5 @@ updates:
       time: "09:00"
       timezone: "UTC"
     open-pull-requests-limit: 3
-    reviewers:
-      - "subculture-collective/maintainers"
     labels:
       - "dependencies"
-      - "docker"
-    target-branch: "develop"

@@ -5,7 +5,7 @@ services:
     # k6 load testing service
     k6:
         container_name: reddit-cluster-k6
-        image: grafana/k6:latest
+        image: grafana/k6:2.3.0
         networks:
             - web
         volumes:

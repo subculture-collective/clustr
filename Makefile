@@ -10,7 +10,7 @@ ROOT_DIR := $(CURDIR)
 COMPOSE_FILE_PATH := $(ROOT_DIR)/backend/docker-compose.yml
 COMPOSE_TEST_FILE_PATH := $(ROOT_DIR)/backend/docker-compose.test.yml
 MIGRATIONS_DIR := $(ROOT_DIR)/backend/migrations
-MIGRATE_IMAGE := migrate/migrate:latest
+MIGRATE_IMAGE := migrate/migrate:v4.20.1
 
 # Docker container names
 DB_CONTAINER = reddit-cluster-db
