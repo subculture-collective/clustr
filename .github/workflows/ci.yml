@@ -24,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache: true
           cache-dependency-path: backend/go.sum
 
@@ -54,7 +54,7 @@ jobs:
         run: bash scripts/test-backend-ci.sh
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
           path: backend/coverage.out
@@ -97,7 +97,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage
           path: frontend/coverage/lcov.info
@@ -123,7 +123,7 @@ jobs:
 
       - name: Upload bundle visualizer
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bundle-stats
           path: frontend/dist/stats.html
@@ -342,7 +342,7 @@ jobs:
 
       - name: Upload test report on failure
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-visual-report
           path: frontend/playwright-report/
@@ -350,7 +350,7 @@ jobs:
 
       - name: Upload test results on failure
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-visual-results
           path: frontend/test-results/
@@ -430,7 +430,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache: true
           cache-dependency-path: backend/go.sum
       - name: Scan changed commits
