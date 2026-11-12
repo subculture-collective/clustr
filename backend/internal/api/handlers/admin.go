@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/admin"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/admin"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 type AdminHandler struct{ q *db.Queries }

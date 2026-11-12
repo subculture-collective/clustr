@@ -9,11 +9,11 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/tracing"
 	"go.opentelemetry.io/otel/attribute"
 )
 

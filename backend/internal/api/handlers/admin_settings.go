@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/admin"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"github.com/sqlc-dev/pqtype"
+	"github.com/subculture-collective/clustr/backend/internal/admin"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 type AdminSettingsHandler struct {

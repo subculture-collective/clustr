@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // queriesAdapter wraps a fake and exposes db.Queries-like methods used in handlers.

@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
 )
 
 var (

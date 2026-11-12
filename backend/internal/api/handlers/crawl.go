@@ -7,10 +7,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/middleware"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/crawler"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/middleware"
 )
 
 type CrawlRequest struct {

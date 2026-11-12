@@ -145,7 +145,7 @@ Token Lifecycle:
 Always mask secrets when logging:
 
 ```go
-import "github.com/onnwee/reddit-cluster-map/backend/internal/secrets"
+import "github.com/subculture-collective/clustr/backend/internal/secrets"
 
 // DO: Mask secrets in logs
 log.Printf("Client ID: %s", secrets.Mask(clientID))

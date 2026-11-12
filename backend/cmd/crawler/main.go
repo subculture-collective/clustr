@@ -10,14 +10,14 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/scheduler"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/crawler"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/errorreporting"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/migrations"
+	"github.com/subculture-collective/clustr/backend/internal/scheduler"
+	"github.com/subculture-collective/clustr/backend/internal/tracing"
 )
 
 func main() {

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // VersionReader interface for version-related queries

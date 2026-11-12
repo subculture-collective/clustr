@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/config"
 )
 
 func TestInitTokenManager(t *testing.T) {

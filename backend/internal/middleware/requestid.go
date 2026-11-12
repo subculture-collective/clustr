@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // RequestIDHeader is the header name for request IDs

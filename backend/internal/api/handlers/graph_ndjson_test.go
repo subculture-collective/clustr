@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
 )
 
 // TestGetGraphData_NDJSON tests the NDJSON streaming functionality

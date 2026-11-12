@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // mockExportDataReader implements ExportDataReader for testing

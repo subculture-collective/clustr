@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
 )
 
 // CacheAdminHandler handles cache administration endpoints.

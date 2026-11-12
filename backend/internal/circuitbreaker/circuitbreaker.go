@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
 )
 
 var (

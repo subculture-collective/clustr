@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/apierr"
+	"github.com/subculture-collective/clustr/backend/internal/apierr"
 	"golang.org/x/time/rate"
 )
 

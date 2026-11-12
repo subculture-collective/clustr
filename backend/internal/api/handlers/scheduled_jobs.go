@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/scheduler"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/utils"
 	"github.com/sqlc-dev/pqtype"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/scheduler"
+	"github.com/subculture-collective/clustr/backend/internal/utils"
 )
 
 type ScheduledJobsHandler struct {

@@ -162,7 +162,7 @@ When implementing a v2.0 sub-issue:
 - **Rate limiting** — All Reddit API calls go through the global ticker in `internal/crawler/ratelimit.go`. Never bypass it.
 - **HTTP retries** — Use `httpx` helpers. They handle `Retry-After`, exponential backoff, and circuit breaker.
 - **Testing** — Table-driven tests. Integration tests live in `backend/internal/graph` and require `TEST_DATABASE_URL`.
-- **Imports** — Order: stdlib → third-party → local. Module path: `github.com/onnwee/reddit-cluster-map/backend`.
+- **Imports** — Order: stdlib → third-party → local. Module path: `github.com/subculture-collective/clustr/backend`.
 
 ### Frontend (React + TypeScript)
 

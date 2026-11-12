@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/cache"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/cache"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // mockTieredGraphDataReader implements GraphDataReader with tiered API methods

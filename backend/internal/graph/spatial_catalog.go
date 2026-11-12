@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // SpatialCatalogOptions bounds the operational footprint of a full-corpus

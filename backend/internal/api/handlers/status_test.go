@@ -3,7 +3,7 @@ package handlers
 import (
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 func TestGetCrawlStatus_Factory(t *testing.T) {

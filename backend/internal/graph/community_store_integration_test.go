@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // TestIntegration_StoreCommunitiesBatched verifies that batched persistence

@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/clusterlabel"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/presentation"
+	"github.com/subculture-collective/clustr/backend/internal/clusterlabel"
+	"github.com/subculture-collective/clustr/backend/internal/presentation"
 )
 
 const BuildAlgorithmVersion = "weighted-multiplex-louvain-v2"

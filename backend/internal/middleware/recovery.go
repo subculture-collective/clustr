@@ -5,8 +5,8 @@ import (
 	"runtime/debug"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/errorreporting"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
 )
 
 // RecoverWithSentry recovers from panics and reports them to Sentry

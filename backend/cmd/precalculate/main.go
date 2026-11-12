@@ -13,14 +13,14 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/admin"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/config"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/errorreporting"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/graph"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/logger"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/tracing"
+	"github.com/subculture-collective/clustr/backend/internal/admin"
+	"github.com/subculture-collective/clustr/backend/internal/config"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/errorreporting"
+	"github.com/subculture-collective/clustr/backend/internal/graph"
+	"github.com/subculture-collective/clustr/backend/internal/logger"
+	"github.com/subculture-collective/clustr/backend/internal/migrations"
+	"github.com/subculture-collective/clustr/backend/internal/tracing"
 )
 
 var (

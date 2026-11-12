@@ -8,11 +8,11 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/crawler"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/graph"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/metrics"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/migrations"
+	"github.com/subculture-collective/clustr/backend/internal/crawler"
+	"github.com/subculture-collective/clustr/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/graph"
+	"github.com/subculture-collective/clustr/backend/internal/metrics"
+	"github.com/subculture-collective/clustr/backend/internal/migrations"
 )
 
 type Server struct {

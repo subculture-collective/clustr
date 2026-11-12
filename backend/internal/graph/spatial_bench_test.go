@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	_ "github.com/lib/pq"
-	"github.com/onnwee/reddit-cluster-map/backend/internal/db"
+	"github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // BenchmarkSpatialQuery_10k benchmarks bounding box query with 10k nodes
