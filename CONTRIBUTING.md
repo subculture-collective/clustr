@@ -28,18 +28,18 @@ Before you begin, ensure you have:
 ### Initial Setup
 
 1. **Fork the repository** on GitHub
-   - Visit https://github.com/subculture-collective/reddit-cluster-map
+   - Visit https://github.com/subculture-collective/clustr
    - Click "Fork" in the top-right corner
 
 2. **Clone your fork:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/reddit-cluster-map.git
-   cd reddit-cluster-map
+   git clone https://github.com/YOUR_USERNAME/clustr.git
+   cd clustr
    ```
 
 3. **Add upstream remote:**
    ```bash
-   git remote add upstream https://github.com/subculture-collective/reddit-cluster-map.git
+   git remote add upstream https://github.com/subculture-collective/clustr.git
    ```
 
 4. **Set up the development environment:**
@@ -252,7 +252,7 @@ import (
     "github.com/go-chi/chi/v5"
     
     // Local imports last
-    "github.com/subculture-collective/reddit-cluster-map/backend/internal/db"
+    "github.com/subculture-collective/clustr/backend/internal/db"
 )
 
 // Exported functions should have doc comments
@@ -491,7 +491,7 @@ limit $2;
 2. **Open a pull request** on GitHub:
    - Go to your fork on GitHub
    - Click "Compare & pull request"
-   - Ensure base repository is `subculture-collective/reddit-cluster-map` and base branch is `main`
+   - Ensure base repository is `subculture-collective/clustr` and base branch is `main`
 
 3. **Fill out the PR template:**
    
@@ -754,8 +754,8 @@ Example:
 - Fixed crawler rate limiting issue
 - Corrected graph layout calculations
 
-[Unreleased]: https://github.com/subculture-collective/reddit-cluster-map/compare/v1.2.3...HEAD
-[1.2.3]: https://github.com/subculture-collective/reddit-cluster-map/compare/v1.2.2...v1.2.3
+[Unreleased]: https://github.com/subculture-collective/clustr/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/subculture-collective/clustr/compare/v1.2.2...v1.2.3
 ```
 
 #### 3. Commit and Tag
@@ -791,18 +791,18 @@ Once you push the tag, GitHub Actions automatically:
    - Tags with: version, major.minor, major, sha, and latest
 
 **Published images:**
-- `ghcr.io/subculture-collective/reddit-cluster-map-server:v1.2.3`
-- `ghcr.io/subculture-collective/reddit-cluster-map-crawler:v1.2.3`
-- `ghcr.io/subculture-collective/reddit-cluster-map-precalculate:v1.2.3`
-- `ghcr.io/subculture-collective/reddit-cluster-map-frontend:v1.2.3`
+- `ghcr.io/subculture-collective/clustr-server:v1.2.3`
+- `ghcr.io/subculture-collective/clustr-crawler:v1.2.3`
+- `ghcr.io/subculture-collective/clustr-precalculate:v1.2.3`
+- `ghcr.io/subculture-collective/clustr-frontend:v1.2.3`
 
 #### 5. Verify the Release
 
-1. Check the [GitHub Releases page](https://github.com/subculture-collective/reddit-cluster-map/releases)
+1. Check the [GitHub Releases page](https://github.com/subculture-collective/clustr/releases)
 2. Verify release notes are correct
 3. Verify Docker images are published:
    ```bash
-   docker pull ghcr.io/subculture-collective/reddit-cluster-map-server:v1.2.3
+   docker pull ghcr.io/subculture-collective/clustr-server:v1.2.3
    ```
 4. Test the release in a staging environment
 
@@ -959,7 +959,7 @@ Contributors will be recognized in release notes and the project README.
 If you have questions about contributing:
 
 1. Check the [Developer Guide](./docs/developer-guide.md)
-2. Search [existing issues](https://github.com/subculture-collective/reddit-cluster-map/issues)
+2. Search [existing issues](https://github.com/subculture-collective/clustr/issues)
 3. Open a new issue with the "question" label
 
 Thank you for contributing to Reddit Cluster Map! 🚀

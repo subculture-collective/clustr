@@ -27,7 +27,7 @@ It is live at [clustr.subcult.tv](https://clustr.subcult.tv). The version in
 - **Search and sharing:** search by name, open any entity by link, and share
   the current camera and filters through the URL. Keyboard shortcuts are listed
   in [frontend/KEYBOARD_SHORTCUTS.md](frontend/KEYBOARD_SHORTCUTS.md)
-  ([help overlay](keyboard-shortcuts-help-overlay.png)).
+  ([help overlay](docs/images/keyboard-shortcuts-help-overlay.png)).
 - **Catalog view:** a paged, filterable list of every entity in a revision,
   behind the `VITE_CATALOG_ENABLED` and `CATALOG_ENABLED` flags.
 - **API:** graph, region, community, entity, search, diff, catalog and sitemap

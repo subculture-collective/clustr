@@ -1262,5 +1262,5 @@ See [docs/CRAWLER_RESILIENCE.md](./CRAWLER_RESILIENCE.md) for configuration deta
    - Environment details (OS, Docker version, etc.)
 
 **Emergency contacts:**
-- GitHub Issues: https://github.com/subculture-collective/reddit-cluster-map/issues
+- GitHub Issues: https://github.com/subculture-collective/clustr/issues
 - Maintainers: See CONTRIBUTING.md

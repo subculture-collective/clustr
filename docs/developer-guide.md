@@ -6,8 +6,8 @@ This guide covers development workflows, tooling, and best practices for contrib
 
 1. **Clone and setup**:
    ```bash
-   git clone https://github.com/subculture-collective/reddit-cluster-map.git
-   cd reddit-cluster-map/backend
+   git clone https://github.com/subculture-collective/clustr.git
+   cd clustr/backend
    make setup
    ```
    This will create `.env` from `.env.example` and check for required tools.

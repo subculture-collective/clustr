@@ -11,7 +11,7 @@ This document shows an example of what the bundle size report looks like on PRs.
 | Total JS bundle | 432.90 KB | 430.50 KB | 🔴 +2.40 KB (+0.56%) |
 | Total CSS bundle | 4.74 KB | 4.70 KB | 🔴 +0.04 KB (+0.85%) |
 
-📊 [View detailed bundle analysis](https://github.com/subculture-collective/reddit-cluster-map/actions/runs/...)
+📊 [View detailed bundle analysis](https://github.com/subculture-collective/clustr/actions/runs/...)
 
 ---
 

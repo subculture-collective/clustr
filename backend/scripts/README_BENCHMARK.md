@@ -173,6 +173,6 @@ If queries are consistently slow:
 
 ## Related Documentation
 
-- [Performance Documentation](../docs/perf.md)
-- [Graph Performance Migration](../docs/graph-performance-migration.md)
-- [Developer Guide](../docs/developer-guide.md)
+- [Performance Documentation](../../docs/perf.md)
+- [Graph Performance Migration](../../docs/graph-performance-migration.md)
+- [Developer Guide](../../docs/developer-guide.md)
