@@ -15,7 +15,7 @@ COPY . .
 RUN npm run build
 
 # Serve stage
-FROM nginx:1.31.7-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
+FROM nginx:1.31.8-alpine@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11
 # Require fixes even when a prior upgrade layer exists in the build cache.
 RUN apk upgrade --no-cache && \
     apk add --no-cache 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0'
