@@ -448,6 +448,7 @@ jobs:
     name: Deploy verified frontend to Almaz
     needs: [test-backend, test-frontend, visual-regression, build-backend-images, build-frontend-image, secrets]
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 25
     env:
       DEPLOY_REVISION: ${{ github.sha }}

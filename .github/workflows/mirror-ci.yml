@@ -235,7 +235,7 @@ jobs:
           if ! docker build --pull \
             --file "./backend/$file" \
             --tag "reddit-cluster-$component:${{ github.sha }}" \
-            --build-arg "VERSION=${{ github.ref_name }}" \
+            --build-arg "VERSION=$GITHUB_REF_NAME" \
             --build-arg "COMMIT=${{ github.sha }}" \
             --build-arg "BUILD_TIME=$BUILD_TIME" \
             ./backend; then
