@@ -27,18 +27,19 @@ jobs:
     name: Deploy verified frontend to Almaz
     if: github.repository == 'subculture-collective/clustr' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    environment: production
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Join the tailnet
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3.3.0
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:github-ci
-          version: latest
+          version: 1.104.7
           # The tailnet resolver is a LAN address this runner cannot reach;
           # keep the runner's own DNS so image and package pulls resolve.
           args: --accept-dns=false
